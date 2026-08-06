@@ -1,0 +1,33 @@
+{
+  "total_energy_MeV": 2285951.3,
+  "weighted_mean_ns": 15.04,
+  "weighted_median_ns": -2.63,
+  "weighted_std_ns": 939.32,
+  "weighted_16_84_ns": [
+    -9.55,
+    4.51
+  ],
+  "energy_within_400ns": 0.952,
+  "n_events": 39,
+  "algorithm": "v0.4.0",
+  "vertex_completeness_min1p0MeV": {
+    "n": 1757,
+    "median_pct": 90.19
+  },
+  "vertex_purity_min1p0MeV": {
+    "n": 1372,
+    "median_pct": 96.29
+  },
+  "vertex_completeness_min5p0MeV": {
+    "n": 1288,
+    "median_pct": 95.15
+  },
+  "vertex_purity_min5p0MeV": {
+    "n": 1348,
+    "median_pct": 96.31
+  },
+  "vertex_tpc_completeness_min5MeV": {
+    "n": 13747,
+    "median_pct": 99.36
+  }
+}

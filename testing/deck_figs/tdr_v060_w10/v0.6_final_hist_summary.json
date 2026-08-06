@@ -1,0 +1,46 @@
+{
+  "total_energy_MeV": 7638084.2,
+  "weighted_mean_ns": 13.3,
+  "weighted_median_ns": -2.73,
+  "weighted_std_ns": 943.14,
+  "weighted_16_84_ns": [
+    -9.92,
+    4.44
+  ],
+  "energy_within_160ns_10ticks": 0.9506,
+  "energy_within_400ns": 0.9547,
+  "n_events": 126,
+  "algorithm": "v0.6",
+  "vertex_completeness_min1p0MeV": {
+    "n": 5867,
+    "median_pct": 92.2
+  },
+  "vertex_purity_min1p0MeV": {
+    "n": 2111,
+    "median_pct": 96.04
+  },
+  "vertex_completeness_min5p0MeV": {
+    "n": 4215,
+    "median_pct": 95.93
+  },
+  "vertex_purity_min5p0MeV": {
+    "n": 1982,
+    "median_pct": 96.13
+  },
+  "vertex_tpc_completeness_min1MeV": {
+    "n": 61099,
+    "median_pct": 97.56
+  },
+  "vertex_tpc_purity_min1MeV": {
+    "n": 42919,
+    "median_pct": 98.03
+  },
+  "vertex_tpc_completeness_min5MeV": {
+    "n": 45778,
+    "median_pct": 99.35
+  },
+  "vertex_tpc_purity_min5MeV": {
+    "n": 37146,
+    "median_pct": 98.29
+  }
+}

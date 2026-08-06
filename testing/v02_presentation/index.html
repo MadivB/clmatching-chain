@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Charge–Light Matching v0.2 — ordered placement &amp; overflow policing</title>
+<style>
+  :root {
+    --accent: #e07020; --accent2: #1f5f8b; --ink: #1c2733; --soft: #5a6b7b;
+    --bg: #fafbfc; --card: #ffffff; --line: #dfe6ec; --good: #1a7f4e; --bad: #c0392b;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: #22282e; font-family: "Helvetica Neue", Arial, sans-serif; }
+  .slide {
+    display: none; width: 100vw; height: 100vh; padding: 3.2vh 4vw;
+    background: var(--bg); color: var(--ink); flex-direction: column; overflow: hidden;
+  }
+  .slide.active { display: flex; }
+  .slide h1 { font-size: 4.4vh; color: var(--accent2); border-bottom: 3px solid var(--accent); padding-bottom: 1vh; margin-bottom: 2vh; }
+  .slide h2 { font-size: 2.6vh; color: var(--accent); margin: 1.2vh 0 0.6vh; }
+  .slide p, .slide li { font-size: 2.25vh; line-height: 1.45; color: var(--ink); }
+  .slide li { margin: 0.55vh 0 0.55vh 2.4vw; }
+  .soft { color: var(--soft); }
+  .good { color: var(--good); font-weight: 600; }
+  .bad { color: var(--bad); font-weight: 600; }
+  .acc { color: var(--accent); font-weight: 600; }
+  .cols { display: flex; gap: 2vw; flex: 1; min-height: 0; }
+  .col { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 1.6vh 1.2vw; margin: 0.8vh 0; }
+  img.fig { max-width: 100%; max-height: 100%; object-fit: contain; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+  .figbox { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; }
+  .cap { font-size: 1.8vh; color: var(--soft); text-align: center; margin-top: 0.5vh; }
+  table { border-collapse: collapse; width: 100%; font-size: 2.05vh; background: var(--card); }
+  th, td { border: 1px solid var(--line); padding: 0.7vh 0.7vw; text-align: center; }
+  th { background: #eef3f7; color: var(--accent2); }
+  td.l, th.l { text-align: left; }
+  .eq { font-family: "Cambria Math", Georgia, serif; font-size: 2.5vh; background: #f3f6f9; border-left: 4px solid var(--accent); padding: 1.2vh 1vw; margin: 1vh 0; }
+  /* flow chart */
+  .flow { display: flex; flex-direction: column; gap: 0.9vh; align-items: center; flex: 1; justify-content: center; }
+  .frow { display: flex; gap: 0.8vw; align-items: center; justify-content: center; flex-wrap: wrap; }
+  .node { background: var(--card); border: 2px solid var(--accent2); border-radius: 9px; padding: 0.9vh 1vw; font-size: 1.95vh; text-align: center; max-width: 22vw; }
+  .node.hot { border-color: var(--accent); background: #fdf3ea; }
+  .node.dec { border-style: dashed; border-color: var(--soft); }
+  .node small { display: block; color: var(--soft); font-size: 1.6vh; }
+  .arrow { color: var(--accent); font-size: 2.6vh; font-weight: 700; }
+  .loopback { color: var(--accent2); font-size: 1.85vh; font-style: italic; }
+  .footer { position: absolute; bottom: 1.2vh; right: 2vw; color: #8a9aa8; font-size: 1.7vh; }
+  .navhint { position: absolute; bottom: 1.2vh; left: 2vw; color: #8a9aa8; font-size: 1.7vh; }
+  .title-slide { justify-content: center; align-items: center; text-align: center; background: linear-gradient(160deg, #10314a 0%, #1f5f8b 60%, #2b769f 100%); }
+  .title-slide h1 { color: #fff; border: none; font-size: 6vh; }
+  .title-slide h3 { color: #ffd9b8; font-size: 3vh; font-weight: 400; margin-top: 2vh; }
+  .title-slide p { color: #cfe3f0; margin-top: 4vh; }
+  .big { font-size: 5.2vh; color: var(--accent); font-weight: 700; }
+  @media print {
+    body { background: #fff; }
+    .slide { display: flex !important; page-break-after: always; height: 100vh; }
+    .navhint, .footer { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<!-- 1 ─ title -->
+<section class="slide title-slide active">
+  <h1>Charge–Light Matching v0.2</h1>
+  <h3>Ordered placement, a physics overflow trigger, and placement policing<br>
+      — a 97.3% ND-LAr backbone —</h3>
+  <p>MiniProdN5p1 development study &nbsp;·&nbsp; 39 events, ~2 TeV of hits &nbsp;·&nbsp; 2026-07</p>
+</section>
+
+<!-- 2 ─ the task -->
+<section class="slide">
+  <h1>The task: give every charge cluster its flash time</h1>
+  <div class="cols">
+    <div class="col">
+      <ul>
+        <li>ND-LAr pile-up: many interactions per spill share one detector — each charge cluster must be matched to the <b>light flash (t<sub>0</sub>)</b> it produced.</li>
+        <li>Per cluster, an ML model (perceiver) predicts its <b>light image</b>: the waveform pattern it would produce on every channel of its TPC(s).</li>
+        <li>Placement = slide that template along time so that the <b>sum of all placed templates</b> explains the recorded light.</li>
+        <li><b>Success metric:</b> a hit is correct if |t<sub>0</sub><sup>reco</sup> − t<sub>0</sub><sup>true</sup>| ≤ 10 ticks; report the energy-weighted fraction.</li>
+      </ul>
+      <div class="eq">loss(s) = Σ<sub>ch,t</sub> w · ( clip(model + shift(template, s)) − actual )²,&nbsp;&nbsp; w = 1 / (200 · max(actual, 100))</div>
+      <p class="soft">Poisson weights (200 ADC ≈ 1 photon); prediction clipped at the 60780 ADC saturation point; scanned over all shifts at once with an FFT.</p>
+    </div>
+    <div class="col">
+      <div class="figbox"><img class="fig" src="figs/ex0_type1_light_charge.png"></div>
+      <p class="cap">One TPC: recorded light (blue), model light from all placed clusters (orange), and the charge tracks in between.</p>
+    </div>
+  </div>
+  <div class="footer">2</div>
+</section>
+
+<!-- 3 ─ why ordering matters -->
+<section class="slide">
+  <h1>Why order matters: place what you are sure about first</h1>
+  <div class="cols">
+    <div class="col">
+      <h2>The v0.1 weakness</h2>
+      <ul>
+        <li>Clusters were placed one-by-one in an <i>arbitrary</i> (label) order.</li>
+        <li>An early cluster is scanned against a nearly <b>empty model</b> — every real flash is unexplained, so several candidate positions look equally good.</li>
+        <li>One early mistake poisons the model for everything placed after it.</li>
+      </ul>
+      <h2>The v0.2 intuition</h2>
+      <ul>
+        <li><b>Most constrained first:</b> showers (as before), then tracks crossing ≥3 TPCs — their multi-TPC pattern pins them almost uniquely.</li>
+        <li>What remains: 1–2-TPC clusters ≥50 MeV — the genuinely ambiguous pool.</li>
+        <li>Within the pool, clusters of <b>comparable energy compete for the same flashes</b> — so don't guess an order: <b>try the orders</b>.</li>
+      </ul>
+    </div>
+    <div class="col">
+      <div class="card">
+        <h2 style="margin-top:0">Energy-banded permutation batches</h2>
+        <ul>
+          <li>Seed = most energetic unplaced cluster (energy E₁).</li>
+          <li>Batch = pool mates sharing a TPC with the seed and E &gt; (1−s)·E₁ — the ones it can be confused with. Cap: 5.</li>
+          <li>Try <b>all orderings</b> (≤ 5! = 120); each ordering places greedily at its scan optimum given everything placed so far.</li>
+          <li>Keep the ordering with the lowest total loss; <b>commit all but the last-placed</b>; the last returns to the pool and is re-examined with the next energy band.</li>
+        </ul>
+        <p class="soft">Band width s swept 0.2 → 0.9: accuracy saturates at s = 0.6 — and the N=5 cap keeps even s = 0.9 at ~5 s/event.</p>
+      </div>
+    </div>
+  </div>
+  <div class="footer">3</div>
+</section>
+
+<!-- 4 ─ flow chart: v0.2 loop -->
+<section class="slide">
+  <h1>The v0.2 placement loop</h1>
+  <div class="flow">
+    <div class="frow">
+      <div class="node">showers placed<small>as in v0.1</small></div>
+      <span class="arrow">→</span>
+      <div class="node">tracks spanning ≥3 TPCs<small>placed by the standard scan</small></div>
+      <span class="arrow">→</span>
+      <div class="node hot">POOL: 1–2-TPC clusters ≥50 MeV<small>the ambiguous ones</small></div>
+    </div>
+    <div class="frow"><span class="arrow">↓</span></div>
+    <div class="frow">
+      <div class="node">seed = most energetic<br>unplaced cluster</div>
+      <span class="arrow">→</span>
+      <div class="node">band: shares a TPC,<br>E &gt; (1−s)·E₁&nbsp;&nbsp;(≤5 members)</div>
+      <span class="arrow">→</span>
+      <div class="node hot">all N! orderings<small>greedy scan placement each;<br>cosine-penalised loss</small></div>
+      <span class="arrow">→</span>
+      <div class="node dec">best ordering<br>by union loss</div>
+    </div>
+    <div class="frow"><span class="arrow">↓</span></div>
+    <div class="frow">
+      <div class="node">commit the first N−1 placements<small>overflow gate can defer a commit once</small></div>
+      <span class="arrow">→</span>
+      <div class="node">LAST-placed returns to the pool<small>re-optimised inside the next band</small></div>
+      <span class="arrow">→</span>
+      <div class="loopback">⟲ repeat until the pool is empty</div>
+    </div>
+    <div class="frow"><span class="arrow">↓</span></div>
+    <div class="frow">
+      <div class="node">swap pass<small>exchange t₀ of shared-TPC pairs<br>if the pair's loss improves</small></div>
+      <span class="arrow">→</span>
+      <div class="node">trigger rescue pass<small>flagged clusters rescanned<br>against the finished model</small></div>
+      <span class="arrow">→</span>
+      <div class="node hot">v0.2 backbone<small>phase-1: 95.1% → 96.4%</small></div>
+    </div>
+  </div>
+  <div class="footer">4</div>
+</section>
+
+<!-- 5 ─ cosine intuition -->
+<section class="slide">
+  <h1>Two physics ingredients inside every scan</h1>
+  <div class="cols">
+    <div class="col">
+      <div class="card">
+        <h2 style="margin-top:0">1 · Cosine matched filter — "does the leftover light <i>look like me</i>?"</h2>
+        <ul>
+          <li>At any candidate shift, compare the cluster's <b>channel pattern</b> at its pulse peak with the pattern of <b>unexplained</b> light there.</li>
+          <li>χ² alone is dominated by the model's ~20–30% amplitude systematics on bright walls; the <b>shape</b> across channels is far more reliable.</li>
+          <li>Used softly: score = loss × (1 + (1 − cos)). A hard cut hurts — never forbid, only penalise.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h2 style="margin-top:0">2 · Poisson overflow — "you cannot claim more light than there is"</h2>
+        <ul>
+          <li>Predicted &gt; actual is physically impossible (light adds up); under-prediction is always possible (someone else's light).</li>
+          <li>z<sub>pois</sub> = (pred − actual) / √(200 · max(actual, 100)) at the pulse-peak tick, prediction clipped at saturation.</li>
+          <li><b>Trigger:</b> ≥3 channels with excess ≥ 500 ADC and z<sub>pois</sub> &gt; 2, OR cos(own, residual) &lt; 0.75 → this placement is suspect.</li>
+        </ul>
+      </div>
+      <p class="soft">Trigger operating point: catches ~50% of wrong placements at ~12% false-alarm — and false alarms only cost a re-check.</p>
+    </div>
+    <div class="col">
+      <div class="figbox"><img class="fig" src="figs/trigger_example.png"></div>
+      <p class="cap">A wrongly placed track: predicted (purple+gray) overshoots the recorded light (black) on many channels at once — the overflow signature.</p>
+    </div>
+  </div>
+  <div class="footer">5</div>
+</section>
+
+<!-- 6 ─ saving algorithm flow -->
+<section class="slide">
+  <h1>The saving algorithm: what to do when the trigger fires</h1>
+  <div class="flow">
+    <div class="frow">
+      <div class="node hot">trigger fires on a placed cluster</div>
+      <span class="arrow">→</span>
+      <div class="node dec">who else sits at this t₀ slot?<small>|Δt₀| ≤ 5, shared TPC</small></div>
+    </div>
+    <div class="frow">
+      <div class="node">
+        <b>N ≥ 2 → Stage A</b>
+        <small>anchored permutations: one member keeps the slot, all orders tried, others re-scanned;
+        adopt the best full arrangement<br><span class="soft">fixes 64% of wrong members, breaks 3%</span></small>
+      </div>
+      <div class="node">
+        <b>everyone stays → Stage B</b>
+        <small>distrust the cross-TPC stitch: cut the firing TPC's part off the merged track —
+        it becomes a NEW cluster and is re-associated downstream at its own energy scale</small>
+      </div>
+      <div class="node">
+        <b>alone at the slot → N = 1</b>
+        <small>the claimed flash may not exist: unanchored full-range rescan (move whole),
+        or part-detach + remainder rescan — fair union-loss comparison<br>
+        <span class="soft">37/37 adopted moves landed on truth</span></small>
+      </div>
+    </div>
+    <div class="frow"><span class="arrow">↓</span></div>
+    <div class="frow">
+      <div class="node">adopt only if the total loss improves<small>with every piece placed — no free lunches</small></div>
+      <span class="arrow">→</span>
+      <div class="node hot">rescued backbone<small>phase-1: 96.4% → 97.7%</small></div>
+    </div>
+  </div>
+  <div class="footer">6</div>
+</section>
+
+<!-- 7 ─ police -->
+<section class="slide">
+  <h1>Placement police: no overflow allowed, <i>at the moment of placement</i></h1>
+  <div class="cols">
+    <div class="col">
+      <ul>
+        <li>Downstream stages (large-cluster association, spatial/light rescue) used to place and move clusters <b>unchecked</b> — a wrong move can plant a wall of 10σ overflow and nobody objects.</li>
+        <li>Now: after each downstream stage, every <b>newly placed or moved</b> cluster is probed at its t₀ — in energy order, against the live model.</li>
+      </ul>
+      <div class="flow" style="flex:0">
+        <div class="frow">
+          <div class="node">stage places / moves a cluster</div>
+          <span class="arrow">→</span>
+          <div class="node dec">overflow gate fires?</div>
+        </div>
+        <div class="frow">
+          <span class="arrow">↓ yes</span>
+        </div>
+        <div class="frow">
+          <div class="node hot">resolve immediately<small>keep · rewind the move · unanchored rescan<br>— whichever has the lowest loss —<br>model updated before the next check</small></div>
+        </div>
+      </div>
+      <ul>
+        <li>The <b>rewind never won once</b>: when a move is bad, a fresh rescan beats both old and new position.</li>
+        <li>Checking only the ~18 brightest channels works equally well — the bright channels are the ones the ML predicts reliably.</li>
+      </ul>
+    </div>
+    <div class="col">
+      <div class="figbox"><img class="fig" src="figs/vfail3_channels.png"></div>
+      <p class="cap">The motivating failure: a downstream move planted an 80k-ADC pulse against a 32k flash — 10σ overflow on nearly every channel. Now caught and corrected on the spot.</p>
+    </div>
+  </div>
+  <div class="footer">7</div>
+</section>
+
+<!-- 8 ─ full pipeline -->
+<section class="slide">
+  <h1>The full pipeline</h1>
+  <div class="flow">
+    <div class="frow">
+      <div class="node">clustering +<br>perceiver light prediction</div>
+      <span class="arrow">→</span>
+      <div class="node">showers · ≥3-TPC tracks<small>constrained first</small></div>
+      <span class="arrow">→</span>
+      <div class="node hot">v0.2 banded permutation loop<small>cos-soft loss · defer gate<br>⟲ iterative, commits N−1 per round</small></div>
+      <span class="arrow">→</span>
+      <div class="node">swap · rescue passes</div>
+    </div>
+    <div class="frow"><span class="arrow">↓</span></div>
+    <div class="frow">
+      <div class="node hot">overflow trigger → saving algorithm<small>Stage A permutations · Stage B detach (new ids) · N=1 rescan<br>⟲ every adoption must improve the union loss</small></div>
+    </div>
+    <div class="frow"><span class="arrow">↓</span></div>
+    <div class="frow">
+      <div class="node">Phase 2: large-cluster association<small>+ <b>police</b> every placement</small></div>
+      <span class="arrow">→</span>
+      <div class="node">V2: spatial + light rescue<small>+ <b>police</b> every move</small></div>
+      <span class="arrow">→</span>
+      <div class="node hot">final assignment<small>97.25% of assigned energy within ±10 ticks</small></div>
+    </div>
+    <p class="soft" style="margin-top:1.5vh">Saturation hygiene throughout: channels clipped &gt;4 ticks are vetoed from every scan and probe; predictions clipped at the ADC ceiling before any comparison.</p>
+  </div>
+  <div class="footer">8</div>
+</section>
+
+<!-- 9 ─ results -->
+<section class="slide">
+  <h1>Results — 39 events, energy-weighted, ±10 ticks</h1>
+  <div class="cols">
+    <div class="col">
+      <table>
+        <tr><th class="l">configuration</th><th>backbone (phase-1)</th><th>final (post-V2)</th></tr>
+        <tr><td class="l">v0.1 (production order)</td><td>95.1%</td><td>95.9%</td></tr>
+        <tr><td class="l">v0.2 ordering (s = 0.6)</td><td>96.1%</td><td>96.4%</td></tr>
+        <tr><td class="l">+ cosine loss · defer · swap · rescue</td><td>96.4%</td><td>96.6%</td></tr>
+        <tr><td class="l">+ saving algorithm (A / B / N=1)</td><td><b>97.7%</b></td><td>97.0%</td></tr>
+        <tr><td class="l">+ placement police</td><td>—</td><td class="acc"><b>97.25%</b></td></tr>
+      </table>
+      <div class="card">
+        <ul style="margin:0">
+          <li>Clusters ≥ 50 MeV: <span class="good">97.4%</span> of their energy correct — with <b>100% assignment coverage</b>.</li>
+          <li>Phase-2-placed cohort (the least constrained): 92.5% → <span class="good">94.0%</span> after policing.</li>
+          <li>Per event: 34 of 39 improved over v0.1 end-to-end.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="col">
+      <div class="figbox"><img class="fig" src="figs/ex4_type4_wrong3d.png"></div>
+      <p class="cap">A typical bright TPC after the full chain (4.3 GeV of hits): every hit within ±10 ticks — no red anywhere.</p>
+    </div>
+  </div>
+  <div class="footer">9</div>
+</section>
+
+<!-- 10 ─ where we still fail -->
+<section class="slide">
+  <h1>Where the remaining 2.7% lives</h1>
+  <div class="cols">
+    <div class="col" style="flex:1.5">
+      <div class="figbox"><img class="fig" src="figs/tpc_energy_vs_wrong.png"></div>
+      <p class="cap">Left: wrong energy vs TPC activity, one point per (event, TPC). Middle: accuracy falls monotonically with TPC busyness. Right: mistake-TPCs are exactly the busy tail.</p>
+    </div>
+    <div class="col">
+      <table>
+        <tr><th>TPC total E</th><th>share of wrong</th><th>accuracy</th></tr>
+        <tr><td>&lt; 300 MeV</td><td>0.3%</td><td class="good">99.7%</td></tr>
+        <tr><td>300–500</td><td>2.5%</td><td class="good">99.3%</td></tr>
+        <tr><td>0.5–1 GeV</td><td>20%</td><td>98.4%</td></tr>
+        <tr><td>1–2 GeV</td><td>38%</td><td>96.6%</td></tr>
+        <tr><td>≥ 2 GeV</td><td>39%</td><td class="bad">95.2%</td></tr>
+      </table>
+      <ul>
+        <li><b>Quiet TPCs are essentially perfect.</b> No TPC below ~300 MeV of activity carries a meaningful mistake.</li>
+        <li>Mistakes appear where a large shower / dense activity lights up the whole wall — every candidate flash becomes plausible and the loss landscape degenerates.</li>
+        <li>Even "clean straight track" failures sit inside multi-GeV TPCs.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="footer">10</div>
+</section>
+
+<!-- 11 ─ closing -->
+<section class="slide">
+  <h1>Summary &amp; next step</h1>
+  <div class="cols">
+    <div class="col">
+      <ul>
+        <li>Constrained-first, permutation-based placement + a physics overflow trigger + immediate policing of every downstream placement:</li>
+      </ul>
+      <p style="text-align:center; margin:2vh 0"><span class="big">95.1% → 97.25%</span><br>
+      <span class="soft">(clusters ≥ 50 MeV: 97.4% at full coverage; quiet TPCs: &gt; 99.4%)</span></p>
+      <ul>
+        <li>Every mechanism is loss-audited: nothing is adopted unless the physical light model improves.</li>
+        <li>The trigger + saving machinery generalises: it fixed v0.1 placements, v0.2 placements, and downstream moves alike.</li>
+      </ul>
+      <div class="card" style="border-left: 5px solid var(--accent)">
+        <p><b>The one remaining frontier is the showering region.</b>
+        Our mistakes are confined to TPCs dominated by large showers / dense activity, where the whole light wall is lit and template matching degenerates.
+        <b>A dedicated shower-recognition path is the next development</b>: detect that a TPC is shower-dominated and hand it to a separate algorithm rather than the standard scan.</p>
+      </div>
+    </div>
+    <div class="col">
+      <div class="figbox"><img class="fig" src="figs/ex0_type4_wrong3d.png"></div>
+      <p class="cap">The target of the next algorithm: a 2.8 GeV TPC where dense activity misleads whole clusters at once (red = wrong).</p>
+    </div>
+  </div>
+  <div class="footer">11</div>
+</section>
+
+<div class="navhint">← → / space / click to navigate · P: print mode for PDF export</div>
+
+<script>
+  const slides = [...document.querySelectorAll(".slide")];
+  let cur = 0;
+  function show(i) {
+    cur = Math.max(0, Math.min(slides.length - 1, i));
+    slides.forEach((s, j) => s.classList.toggle("active", j === cur));
+    location.hash = "#" + (cur + 1);
+  }
+  document.addEventListener("keydown", e => {
+    if (e.key === "ArrowRight" || e.key === " " || e.key === "PageDown") show(cur + 1);
+    else if (e.key === "ArrowLeft" || e.key === "PageUp") show(cur - 1);
+    else if (e.key === "Home") show(0);
+    else if (e.key === "End") show(slides.length - 1);
+    else if (e.key.toLowerCase() === "p") window.print();
+  });
+  document.addEventListener("click", e => {
+    if (e.clientX > window.innerWidth / 2) show(cur + 1); else show(cur - 1);
+  });
+  const h = parseInt(location.hash.slice(1));
+  if (h >= 1 && h <= slides.length) show(h - 1);
+</script>
+</body>
+</html>

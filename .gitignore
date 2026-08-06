@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+*.log
+nohup.out
+*.pkl
+*.npz
+# per-run outputs and dumps (regenerable; live on NERSC)
+testing/*_out/
+testing/v056_alldumps/
+# event-display galleries (analysis artifacts, ~1 GB)
+testing/v02_displays/
+testing/bad_tpc_gallery/
+testing/display_dump/
+testing/overflow_displays/
+testing/still_wrong_gallery/
+testing/v02_failures/

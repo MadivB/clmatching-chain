@@ -1,0 +1,33 @@
+{
+  "events": 39,
+  "cut_ticks": 10,
+  "rows": [
+    {
+      "category": "all hits",
+      "n_hits": 6849698,
+      "hit_eff_pct": 95.045,
+      "energy_eff_pct": 94.763,
+      "total_energy_MeV": 2285951.3,
+      "wrong_energy_MeV": 119712.4,
+      "energy_frac_of_all": 1.0
+    },
+    {
+      "category": "backbone",
+      "n_hits": 5041112,
+      "hit_eff_pct": 98.237,
+      "energy_eff_pct": 98.146,
+      "total_energy_MeV": 1606745.8,
+      "wrong_energy_MeV": 29790.7,
+      "energy_frac_of_all": 0.7029
+    },
+    {
+      "category": "non-backbone",
+      "n_hits": 1808586,
+      "hit_eff_pct": 86.146,
+      "energy_eff_pct": 86.761,
+      "total_energy_MeV": 679205.5,
+      "wrong_energy_MeV": 89921.7,
+      "energy_frac_of_all": 0.2971
+    }
+  ]
+}

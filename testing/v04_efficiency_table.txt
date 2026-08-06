@@ -1,0 +1,5 @@
+ND-LAr v0.4 charge-light matching efficiency  (39 events, |reco-truth|<=10 ticks)
+      category     N hits  hit eff %  energy eff %  energy frac
+      all hits    6849698      95.05         94.76        1.000
+      backbone    5041112      98.24         98.15        0.703
+  non-backbone    1808586      86.15         86.76        0.297
