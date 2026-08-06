@@ -71,6 +71,7 @@ STAGE_CHECKPOINTS = [
     ("after_early_expand", "3.25_early_expansion"),
     ("after_staged", "3.3+3.5_p2_v2_police"),
     ("after_expand", "3.9_expansion"),
+    ("after_joint", "3.9_joint"),
     ("after_matrix", "4.1_matrix"),
     ("after_matrix_relax", "4.2_matrix_relax"),
     ("after_swap_fix", "4.5_swap_fix"),
@@ -374,7 +375,7 @@ def main() -> int:
     ap.add_argument("--cheat", choices=["none", "type1", "type12"], default="none",
                     help="three-stage cheating study: truth-lock type-1 (showers/"
                          ">=3-TPC tracks) or types 1+2 (all big clusters) at MC truth")
-    ap.add_argument("--phase3", choices=["none", "matrix", "expand", "both"], default="none",
+    ap.add_argument("--phase3", choices=["none", "matrix", "expand", "both", "joint"], default="none",
                     help="small-cluster stage after V2: matrix = v11 error-matrix "
                          "(old way), expand = v0.3.0 family expansion, both = "
                          "expansion then matrix tail")
@@ -402,6 +403,10 @@ def main() -> int:
     ap.add_argument("--frontend-params", default=None,
                     help="params json for the external front end "
                          "(default <repo>/params_full.json)")
+    ap.add_argument("--joint-tpc-emax", type=float, default=1400.0,
+                    help="--phase3 joint: clusters in TPCs above this charge "
+                         "energy [MeV] are left for the matrix (shower TPCs); "
+                         "<=0 disables the split")
     ap.add_argument("--matrix-relax", action="store_true",
                     help="v0.7 experiment: after the first matrix pass, KEEP the "
                          "matrix propagating over the still-unassigned imaged tail "
@@ -1599,6 +1604,44 @@ def main() -> int:
                 ts_pre3 = np.asarray(ns1["hit_timestamps"], dtype=np.float64).copy()
                 A_pre3 = np.isfinite(ts_pre3) & (ts_pre3 >= 0)
                 p3_row = {"mode": args.phase3}
+                if args.phase3 == "joint":
+                    if _HERE not in sys.path:
+                        sys.path.insert(0, _HERE)
+                    from v070_joint import run_joint_assignment
+                    st_j = run_joint_assignment(
+                        ns1, verbose=False,
+                        params={"TPC_E_MAX": (float(args.joint_tpc_emax)
+                                              if args.joint_tpc_emax > 0 else None)})
+                    for _aj in st_j.get("assigned", []):
+                        _labj, _t0j = int(_aj["label"]), float(_aj["t0"])
+                        for _cj in cluster_to_tpcs.get(_labj, []):
+                            _cj = int(_cj)
+                            if _cj >= n_light or (_labj, _cj) not in ns1["imageMaps"]:
+                                continue
+                            append_candidate_t0(ns1["t0Candidates"][_cj], _t0j,
+                                                min_sep=2, max_t0=SEARCH)
+                            while len(ns1["flash_cluster_received_by_tpc"][_cj]) < \
+                                    len(ns1["t0Candidates"][_cj]):
+                                ns1["flash_cluster_received_by_tpc"][_cj].append(False)
+                            ns1["assignment_info"][(_labj, _cj)] = {
+                                "clusterid": _labj, "tpcid": _cj, "t0": _t0j,
+                                "mode": "joint", "stage": "joint",
+                                "assigned": True, "energy": float(_aj["e"])}
+                    st_j.pop("assigned", None)
+                    ts_pj = np.asarray(ns1["hit_timestamps"], dtype=np.float64)
+                    new_j = np.isfinite(ts_pj) & (ts_pj >= 0) & ~A_pre3
+                    m1["p3e_acc"], m1["p3e_afrac"] = accuracy(ts_pj, truth_t0, e_pos)
+                    m1["p3e_acc_new"], _ = accuracy(ts_pj, truth_t0, e_pos, mask=new_j)
+                    m1["p3e_new_efrac"] = float(e_pos[new_j].sum() / max(e_pos.sum(), 1e-9))
+                    _taken_j = set(st_j.pop("member_labels", []))
+                    for _k in ("v11_iterative_single_tpc", "unassigned_by_tpc"):
+                        for _t, _lst in list(ns1[_k].items()):
+                            ns1[_k][_t] = [cc for cc in _lst if int(cc) not in _taken_j]
+                    ns1["v11_pruned_iterative_clusters"] = [
+                        cc for cc in ns1.get("v11_pruned_iterative_clusters", [])
+                        if int(cc) not in _taken_j]
+                    p3_row["joint"] = st_j
+                    tim["after_joint"] = time.time() - t_ev
                 if args.phase3 in ("expand", "both"):
                     if _HERE not in sys.path:
                         sys.path.insert(0, _HERE)
@@ -1628,7 +1671,7 @@ def main() -> int:
                     m1["p3e_new_efrac"] = float(e_pos[new_e].sum() / max(e_pos.sum(), 1e-9))
                     p3_row["expand"] = st_e
                     tim["after_expand"] = time.time() - t_ev
-                if args.phase3 in ("matrix", "both"):
+                if args.phase3 in ("matrix", "both", "joint"):
                     from v11_phased_matching import run_small_cluster_matrix_phase_v11
                     (p3_base, p3_ts, p3_cand, p3_ainfo, p3_unass, p3_log, _p3u,
                      p3_stats) = run_small_cluster_matrix_phase_v11(

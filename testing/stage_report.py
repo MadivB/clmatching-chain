@@ -95,6 +95,20 @@ def main():
     print(f"  post-V2 accuracy among assigned {100*wmean(rows,'v2_acc'):.2f}% "
           f"at coverage {100*wmean(rows,'v2_afrac'):.1f}%\n")
 
+    # ---- stage 3.9 joint (v0.7-b), when present ----
+    jt = [r["phase3"].get("joint") or {} for r in rows if r.get("phase3")]
+    if any(jt):
+        print("STAGE 3.9-JOINT (mean-field joint assignment):")
+        print(f"  candidates {sum(x.get('n_cands',0) for x in jt)/n:.0f}/event, "
+              f"assigned {sum(x.get('n_assigned',0) for x in jt)/n:.0f}/event "
+              f"({sum(x.get('e_assigned',0) for x in jt)/max(n,1):.0f} MeV/event)")
+        print(f"  slots {sum(x.get('n_slots',0) for x in jt)/n:.0f}/event | "
+              f"connected slots {sum(x.get('n_connected_slots',0) for x in jt)/n:.0f}/event | "
+              f"pairs {sum(x.get('n_pairs',0) for x in jt)/n:.0f}/event | "
+              f"sweeps {np.mean([x.get('sweeps',0) for x in jt if x]):.0f}")
+        _ja, _ = cohort_acc(rows, "p3e_acc_new", "p3e_new_efrac")
+        print(f"  cohort accuracy {100*_ja:.1f}% -> wrong {100-100*_ja:.1f}%\n")
+
     # ---- stage 3.9 expansion ----
     ex = [r["phase3"].get("expand") or {} for r in rows if r.get("phase3")]
     e_asn = sum(x.get("e_assigned", 0) for x in ex)
@@ -111,7 +125,9 @@ def main():
 
     # ---- stage 4.1 matrix ----
     mx = [r["phase3"].get("matrix") or {} for r in rows if r.get("phase3")]
-    print("STAGE 4.1 (error-matrix tail):")
+    _joint_mode = any(jt)
+    print("STAGE 4.1 (error-matrix tail):" if not _joint_mode
+          else "STAGE 4.x (post-joint corrections: swap-fix + force delta):")
     print(f"  proposed {sum(x.get('n_proposed',0) for x in mx)/n:.0f}/event, "
           f"assigned {sum(x.get('n_assigned',0) for x in mx)/n:.0f}/event")
     num = den = tot = 0.0
@@ -125,7 +141,8 @@ def main():
         den += te * (fa_i - fe_i)
         tot += te
     if den / max(tot, 1e-9) > 1e-4:
-        print(f"  matrix+force cohort accuracy {100*num/den:.1f}% on "
+        _lbl = "matrix+force" if not _joint_mode else "post-joint (force-only)"
+        print(f"  {_lbl} cohort accuracy {100*num/den:.1f}% on "
               f"{100*den/tot:.1f}% of event energy\n")
     else:
         print("  matrix+force cohort: negligible energy (expansion covered "
