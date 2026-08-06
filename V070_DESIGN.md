@@ -1,3 +1,20 @@
+# v0.7 — joint probabilistic small-cluster assignment  **[ADOPTED 2026-08-06]**
+
+## ADOPTION (126 events / 10 files, jobs 56415736 + 56416591)
+
+| | v0.6 | **v0.7 hybrid** |
+|---|---|---|
+| NS total-eff | 96.05% | **96.19%** (+0.14pp paired, 96/30; ALL 10 files better) |
+| all-TPC eff | 95.06% | 95.07% (no regression) |
+| time/event | 268 s | **233 s** (-13%) |
+
+Canonical v0.7 flags = v0.6 flags with `--phase3 joint` (implies the hybrid:
+the mean-field solver owns clusters in TPCs <= `--joint-tpc-emax` 1400 MeV,
+the v11 matrix keeps shower TPCs; expansion retired from the canonical chain).
+Implementation: `testing/v070_joint.py`. Development history: iter-1
+(prior annealed away -> matrix-like), iter-2 (energy-units prior, +NS but
+shower-TPC regression), iter-3 (hybrid split, both metrics clear).
+
 # v0.7 design — joint probabilistic small-cluster assignment
 ### (formalizing the "[t, p(t)|S, p(t)|L] iterative array" idea, 2026-08-05)
 
