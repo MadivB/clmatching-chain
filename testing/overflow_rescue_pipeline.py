@@ -73,6 +73,7 @@ STAGE_CHECKPOINTS = [
     ("after_expand", "3.9_expansion"),
     ("after_joint", "3.9_joint"),
     ("after_pass2", "3.95_pass2_trade"),
+    ("after_pass3f", "3.97_pass3_family"),
     ("after_matrix", "4.1_matrix"),
     ("after_matrix_relax", "4.2_matrix_relax"),
     ("after_swap_fix", "4.5_swap_fix"),
@@ -412,6 +413,9 @@ def main() -> int:
     ap.add_argument("--pass2-margin", type=float, default=0.3)
     ap.add_argument("--pass2-pmin", type=float, default=0.6)
     ap.add_argument("--pass2-veto-frac", type=float, default=0.25)
+    ap.add_argument("--pass3-family", action="store_true",
+                    help="v0.8 PASS 3 (Q1): rigid family MOVE rescans + "
+                         "ridge-flash CLOSE dissolution, after PASS 2")
     ap.add_argument("--joint-tpc-emax", type=float, default=1400.0,
                     help="--phase3 joint: clusters in TPCs above this charge "
                          "energy [MeV] are left for the matrix (shower TPCs); "
@@ -1801,6 +1805,23 @@ def main() -> int:
                     p3_row["pass2"] = st_p2
                     p3_row["pass2_audit"] = audit_p2
                     tim["after_pass2"] = time.time() - t_ev
+                if args.pass3_family:
+                    if _HERE not in sys.path:
+                        sys.path.insert(0, _HERE)
+                    from v080_pass3 import run_pass3_family_light
+                    st_p3f = run_pass3_family_light(ns1, truth_fn=_label_truth,
+                                                    verbose=False)
+                    audit_p3f = st_p3f.pop("audit", [])
+                    for _op in ("move", "close"):
+                        st_p3f[f"{_op}_fixed"] = sum(
+                            1 for a in audit_p3f if a["op"] == _op
+                            and not a.get("was_ok") and a.get("now_ok"))
+                        st_p3f[f"{_op}_broke"] = sum(
+                            1 for a in audit_p3f if a["op"] == _op
+                            and a.get("was_ok") and not a.get("now_ok"))
+                    p3_row["pass3_family"] = st_p3f
+                    p3_row["pass3_audit"] = audit_p3f
+                    tim["after_pass3f"] = time.time() - t_ev
                 if args.swap_fix:
                     if _HERE not in sys.path:
                         sys.path.insert(0, _HERE)
