@@ -420,9 +420,18 @@ def main() -> int:
                     help="v0.8.1: light-nominated trade candidates — add "
                          "families whose t0 the cluster's own loss curve "
                          "finds near-optimal to the 8-nearest spatial set")
+    ap.add_argument("--pass2-light-prop", action="store_true",
+                    help="v0.8.2: symmetric dual acceptance — light PROPOSES "
+                         "(strong curve preference) with spatial as a weak "
+                         "veto floor, alongside the spatial-margin path")
     ap.add_argument("--pass2-iterations", type=int, default=1,
                     help="run PASS 2 trading this many times (Q2 re-asked on "
                          "the improved geometry)")
+    ap.add_argument("--loop-p23", type=int, default=0,
+                    help="v0.8.2: alternate PASS2 (Q2 trade) and PASS3 (Q1 "
+                         "family move/close) this many rounds — the full "
+                         "light<->spatial iteration; overrides the separate "
+                         "pass2-iterations/pass3-family paths")
     ap.add_argument("--pass3-family", action="store_true",
                     help="v0.8 PASS 3 (Q1): rigid family MOVE rescans + "
                          "ridge-flash CLOSE dissolution, after PASS 2")
@@ -1816,7 +1825,61 @@ def main() -> int:
                         tim["after_matrix_relax"] = time.time() - t_ev
                         _evo("4.2_matrix_relax", ns1["hit_timestamps"])
                 # ---------- STAGE 4.5: per-TPC swap fix ----------
-                if args.pass2_trade:
+                if args.loop_p23 > 0 and args.pass2_trade:
+                    # ---- v0.8.2: the full Q1<->Q2 alternation ----
+                    if _HERE not in sys.path:
+                        sys.path.insert(0, _HERE)
+                    from v080_pass2 import run_pass2_trading
+                    from v080_pass3 import run_pass3_family_light
+                    audit_p2, audit_p3f, loop_log = [], [], []
+                    st_p2, st_p3f = {}, {}
+                    for _rd in range(int(args.loop_p23)):
+                        st_p2 = run_pass2_trading(
+                            ns1, model_path=args.pass2_model,
+                            margin=float(args.pass2_margin),
+                            p_min=float(args.pass2_pmin),
+                            veto_frac=float(args.pass2_veto_frac),
+                            light_nominate=bool(args.pass2_light_nom),
+                            light_propose=bool(args.pass2_light_prop),
+                            truth_fn=_label_truth, verbose=False)
+                        audit_p2 += st_p2.pop("audit", [])
+                        st_p3f = run_pass3_family_light(
+                            ns1, truth_fn=_label_truth, verbose=False)
+                        audit_p3f += st_p3f.pop("audit", [])
+                        loop_log.append({
+                            "round": _rd + 1,
+                            "p2_traded": int(st_p2.get("n_traded", 0)),
+                            "p2_via_light": int(st_p2.get("n_traded_via_light", 0)),
+                            "p3_moved": int(st_p3f.get("n_moved", 0)),
+                            "p3_swapped": int(st_p3f.get("n_swapped", 0)),
+                            "p3_closed": int(st_p3f.get("n_closed", 0))})
+                        if (st_p2.get("n_traded", 0) == 0
+                                and st_p3f.get("n_moved", 0) == 0
+                                and st_p3f.get("n_swapped", 0) == 0
+                                and st_p3f.get("n_closed", 0) == 0):
+                            break
+                    st_p2["iterations"] = len(loop_log)
+                    st_p2["n_fixed"] = sum(1 for a in audit_p2
+                                           if not a.get("was_ok") and a.get("now_ok"))
+                    st_p2["n_broke"] = sum(1 for a in audit_p2
+                                           if a.get("was_ok") and not a.get("now_ok"))
+                    for _op in ("move", "swap", "close"):
+                        st_p3f[f"{_op}_fixed"] = sum(
+                            1 for a in audit_p3f if a["op"] == _op
+                            and not a.get("was_ok") and a.get("now_ok"))
+                        st_p3f[f"{_op}_broke"] = sum(
+                            1 for a in audit_p3f if a["op"] == _op
+                            and a.get("was_ok") and not a.get("now_ok"))
+                    p3_row["loop"] = loop_log
+                    p3_row["pass2"] = st_p2
+                    p3_row["pass2_audit"] = audit_p2
+                    p3_row["pass3_family"] = st_p3f
+                    p3_row["pass3_audit"] = audit_p3f
+                    tim["after_pass2"] = time.time() - t_ev
+                    _evo("3.95_pass2_trade", ns1["hit_timestamps"])
+                    tim["after_pass3f"] = time.time() - t_ev
+                    _evo("3.97_pass3_family", ns1["hit_timestamps"])
+                elif args.pass2_trade:
                     if _HERE not in sys.path:
                         sys.path.insert(0, _HERE)
                     from v080_pass2 import run_pass2_trading
@@ -1828,6 +1891,7 @@ def main() -> int:
                             p_min=float(args.pass2_pmin),
                             veto_frac=float(args.pass2_veto_frac),
                             light_nominate=bool(args.pass2_light_nom),
+                            light_propose=bool(args.pass2_light_prop),
                             truth_fn=_label_truth, verbose=False)
                         audit_p2 += st_p2.pop("audit", [])
                         if st_p2.get("n_traded", 0) == 0:
@@ -1841,7 +1905,7 @@ def main() -> int:
                     p3_row["pass2_audit"] = audit_p2
                     tim["after_pass2"] = time.time() - t_ev
                     _evo("3.95_pass2_trade", ns1["hit_timestamps"])
-                if args.pass3_family:
+                if args.pass3_family and args.loop_p23 == 0:
                     if _HERE not in sys.path:
                         sys.path.insert(0, _HERE)
                     from v080_pass3 import run_pass3_family_light

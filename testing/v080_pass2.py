@@ -37,6 +37,8 @@ def run_pass2_trading(ns: dict[str, Any], *, model_path: str,
                       veto_frac: float = 0.25, n_cand_fams: int = 8,
                       light_nominate: bool = False, nom_frac: float = 0.15,
                       nom_flag_frac: float = 0.4, nom_max: int = 4,
+                      light_propose: bool = False, lp_cur_frac: float = 0.5,
+                      lp_dest_frac: float = 0.1, lp_p_floor: float = 0.15,
                       truth_fn: Callable | None = None,
                       verbose: bool = False) -> dict[str, Any]:
     md = _load_model(model_path)
@@ -57,7 +59,8 @@ def run_pass2_trading(ns: dict[str, Any], *, model_path: str,
 
     stats = {"n_considered": 0, "n_scored": 0, "n_proposed": 0, "n_vetoed": 0,
              "n_traded": 0, "e_traded": 0.0, "n_light_flagged": 0,
-             "n_light_nom": 0, "n_traded_via_light": 0, "audit": []}
+             "n_light_nom": 0, "n_traded_via_light": 0,
+             "n_light_proposed": 0, "n_traded_light_prop": 0, "audit": []}
 
     # ---------- shapes + assigned times ----------
     shp, atime, cmask = {}, {}, {}
@@ -95,7 +98,7 @@ def run_pass2_trading(ns: dict[str, Any], *, model_path: str,
     # (same definition as the veto) and nominate every family whose t0 the
     # light finds near-optimal.
     nom_cache = {}
-    if light_nominate:
+    if light_nominate or light_propose:
         for c in small:
             t_cur = atime[c]
             prs, brs, wrs = [], [], []
@@ -183,11 +186,43 @@ def run_pass2_trading(ns: dict[str, Any], *, model_path: str,
         g_best = max(alts, key=lambda g: ps[g])
         if ps[g_best] - p_cur > margin and ps[g_best] > p_min:
             proposals.append((ps[g_best] - p_cur, rec["c"], gc, g_best,
-                              g_best in rec["light_only"]))
+                              g_best in rec["light_only"], False))
+            continue
+        # ---- v0.8.2: the symmetric dual — LIGHT proposes, spatial vetoes.
+        # Strong curve preference for a candidate family's time + weak
+        # spatial plausibility floor (instead of the full margin).
+        if light_propose:
+            curve = nom_cache.get(rec["c"])
+            if curve is None:
+                continue
+            rng = float(np.ptp(curve))
+            if rng <= 0:
+                continue
+            cm = float(curve.min())
+            i_cur = int(round(min(max(atime[rec["c"]], 0), SEARCH)))
+            if float(curve[i_cur]) - cm <= lp_cur_frac * rng:
+                continue        # light does not object to the current spot
+            lp = []
+            for g in alts:
+                ig = int(round(min(max(F[g]["t0"], 0), SEARCH)))
+                if (float(curve[ig]) - cm <= lp_dest_frac * rng
+                        and ps[g] >= lp_p_floor and ps[g] >= p_cur):
+                    lp.append((float(curve[i_cur]) - float(curve[ig]), g))
+            if lp:
+                lp.sort(reverse=True)
+                stats["n_light_proposed"] += 1
+                # rank below all margin proposals (gain scaled tiny)
+                proposals.append((-1.0 + ps[lp[0][1]], rec["c"], gc,
+                                  lp[0][1], lp[0][1] in rec["light_only"],
+                                  True))
     proposals.sort(reverse=True)
     stats["n_proposed"] = len(proposals)
 
-    for gain, c, gc, g_new, via_light in proposals:
+    done = set()
+    for gain, c, gc, g_new, via_light, light_prop in proposals:
+        if c in done:
+            continue
+        done.add(c)
         t_cur, t_new = atime[c], F[g_new]["t0"]
         if abs(t_new - t_cur) <= 2.0:
             continue
@@ -222,10 +257,13 @@ def run_pass2_trading(ns: dict[str, Any], *, model_path: str,
         stats["n_traded"] += 1
         if via_light:
             stats["n_traded_via_light"] += 1
+        if light_prop:
+            stats["n_traded_light_prop"] += 1
         e_c = float(e_pos[cmask[c]].sum())
         stats["e_traded"] += e_c
         rec = {"label": int(c), "from_t": float(t_cur), "to_t": float(t_new),
-               "e": e_c, "gain": float(gain), "via_light": bool(via_light)}
+               "e": e_c, "gain": float(gain), "via_light": bool(via_light),
+               "light_prop": bool(light_prop)}
         if truth_fn is not None:
             tr = truth_fn(int(c))
             rec["truth"] = tr
