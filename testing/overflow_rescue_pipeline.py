@@ -413,6 +413,9 @@ def main() -> int:
     ap.add_argument("--pass2-margin", type=float, default=0.3)
     ap.add_argument("--pass2-pmin", type=float, default=0.6)
     ap.add_argument("--pass2-veto-frac", type=float, default=0.25)
+    ap.add_argument("--pass2-iterations", type=int, default=1,
+                    help="run PASS 2 trading this many times (Q2 re-asked on "
+                         "the improved geometry)")
     ap.add_argument("--pass3-family", action="store_true",
                     help="v0.8 PASS 3 (Q1): rigid family MOVE rescans + "
                          "ridge-flash CLOSE dissolution, after PASS 2")
@@ -1791,13 +1794,18 @@ def main() -> int:
                     if _HERE not in sys.path:
                         sys.path.insert(0, _HERE)
                     from v080_pass2 import run_pass2_trading
-                    st_p2 = run_pass2_trading(
-                        ns1, model_path=args.pass2_model,
-                        margin=float(args.pass2_margin),
-                        p_min=float(args.pass2_pmin),
-                        veto_frac=float(args.pass2_veto_frac),
-                        truth_fn=_label_truth, verbose=False)
-                    audit_p2 = st_p2.pop("audit", [])
+                    audit_p2 = []
+                    for _it in range(max(1, int(args.pass2_iterations))):
+                        st_p2 = run_pass2_trading(
+                            ns1, model_path=args.pass2_model,
+                            margin=float(args.pass2_margin),
+                            p_min=float(args.pass2_pmin),
+                            veto_frac=float(args.pass2_veto_frac),
+                            truth_fn=_label_truth, verbose=False)
+                        audit_p2 += st_p2.pop("audit", [])
+                        if st_p2.get("n_traded", 0) == 0:
+                            break
+                    st_p2["iterations"] = _it + 1
                     st_p2["n_fixed"] = sum(1 for a in audit_p2
                                            if not a.get("was_ok") and a.get("now_ok"))
                     st_p2["n_broke"] = sum(1 for a in audit_p2
@@ -1812,7 +1820,7 @@ def main() -> int:
                     st_p3f = run_pass3_family_light(ns1, truth_fn=_label_truth,
                                                     verbose=False)
                     audit_p3f = st_p3f.pop("audit", [])
-                    for _op in ("move", "close"):
+                    for _op in ("move", "swap", "close"):
                         st_p3f[f"{_op}_fixed"] = sum(
                             1 for a in audit_p3f if a["op"] == _op
                             and not a.get("was_ok") and a.get("now_ok"))

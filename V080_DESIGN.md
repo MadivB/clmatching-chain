@@ -1,6 +1,37 @@
 # v0.8 design — iterative light–spatial refinement with a structural spatial score
 ### (user scheme, 2026-08-06)
 
+## VERDICT (2026-08-06) — v0.8 ADOPTED as v0.7 + PASS 2 (single iteration)
+
+Canonical v0.8 = canonical v0.7 flags + `--pass2-trade`.
+126-event ledger (both metrics, energy-weighted):
+
+| chain | NS (<=1.4 GeV) | all-TPC |
+|---|---|---|
+| v0.6 | 96.05 | 95.06 |
+| v0.7 (joint) | 96.19 | 95.07 |
+| **v0.8 (joint + PASS 2 trade)** | **96.49** | **95.49** |
+
+PASS 2 event record 125 better / 1 worse; trade audit FIXED 699 / BROKE 132
+(files 6–10 fully out-of-sample: same gains, no train-leakage effect).
+
+Operators tested and NOT adopted (available behind flags, off by default):
+- **PASS 3 MOVE + CLOSE** (`--pass3-family`): metric-neutral on file 0000001
+  (MOVE 0.1/event, CLOSE 4.2/event at 2 fixed / 2 broke).
+- **Q1-SWAP** (family-pair t0 exchange): 472 pairs tried, 0 accepted.
+  Offline census over ALL 126 dumps (v0.6 geometry, more errors than v0.8):
+  25 candidate pairs total, ZERO true swap pairs, best joint-loss ratio 0.964
+  (gate 0.85). The v0.3.0 "91% of residual wrong energy = swaps" failure mode
+  has been fully absorbed by the v0.4.1 merged permutation pool + v0.7 joint
+  MRF solver — the operator's target population no longer exists.
+- **PASS 2 x2 iterations** (`--pass2-iterations 2`): converged after round 1
+  (round 2 trades ~6 clusters/13 events, metrics bit-identical). The loop is
+  stable; no iteration needed.
+
+Remaining headroom per the cheating study: type-3 small clusters (~2.6pp) and
+type-2 (~1.7pp) — i.e. sub-20 MeV placement and template systematics, not
+family-level structure.
+
 ## The scheme
 
 Coordinate descent between two views of the same assignment, at two

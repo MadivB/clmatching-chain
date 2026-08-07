@@ -20,6 +20,7 @@ CUT = 10.0
 
 def run_pass3_family_light(ns: dict[str, Any], *,
                            move_ratio: float = 0.85,
+                           swap_ratio: float = 0.85,
                            close_ratio: float = 1.05,
                            close_dt_max: float = 12.0,
                            min_move_ticks: float = 3.0,
@@ -37,6 +38,7 @@ def run_pass3_family_light(ns: dict[str, Any], *,
     assigned = np.isfinite(ts) & (ts >= 0)
 
     stats = {"n_families": 0, "n_move_tried": 0, "n_moved": 0,
+             "n_swap_tried": 0, "n_swapped": 0,
              "n_close_tried": 0, "n_closed": 0, "audit": []}
 
     # ---------- families = time groups of assigned clusters ----------
@@ -134,6 +136,64 @@ def run_pass3_family_light(ns: dict[str, Any], *,
                                    "was_ok": was_ok,
                                    "now_ok": (tr is not None
                                               and abs(fi["t0"] - tr) <= CUT)})
+
+    # ---------- Q1-SWAP: rigid family-pair t0 exchange ----------
+    # the 91% failure mode: two co-located families traded flashes wholesale.
+    # A single-family rescan cannot fix it (the partner's light blocks the
+    # destination); the pairwise exchange evaluates both moves JOINTLY.
+    def chan_sig(fi):
+        return set((c, int(ch)) for _, c, ch in top_channels(fi["stk"]))
+    sigs = {id(fi): chan_sig(fi) for fi in fam_info}
+    cand_pairs = []
+    for i in range(len(fam_info)):
+        for j in range(i + 1, len(fam_info)):
+            fi, fj = fam_info[i], fam_info[j]
+            if fi["e"] < 20.0 or fj["e"] < 20.0:
+                continue
+            dt = abs(fi["t0"] - fj["t0"])
+            if dt < min_move_ticks or dt > 250.0:
+                continue
+            shared = len(sigs[id(fi)] & sigs[id(fj)])
+            if shared >= 2:
+                cand_pairs.append((shared, i, j))
+    cand_pairs.sort(reverse=True)
+    swapped = set()
+    for shared, i, j in cand_pairs[:200]:
+        fi, fj = fam_info[i], fam_info[j]
+        if id(fi) in swapped or id(fj) in swapped:
+            continue
+        stats["n_swap_tried"] += 1
+        rows = list(dict.fromkeys(top_channels(fi["stk"]) + top_channels(fj["stk"])))[:60]
+        chans = [(c, ch) for _, c, ch in rows]
+        ti0, tj0 = fi["t0"], fj["t0"]
+        def stack_at(fk, t):
+            return {(c, ch): _shift(fk["stk"][c], t, n_ticks)[ch]
+                    for c, ch in chans if c in fk["stk"]}
+        si_cur, sj_cur = stack_at(fi, ti0), stack_at(fj, tj0)
+        si_new, sj_new = stack_at(fi, tj0), stack_at(fj, ti0)
+        l_cur = l_new = 0.0
+        for c, ch in chans:
+            b0 = (np.asarray(base[c], np.float64)[ch]
+                  - si_cur.get((c, ch), 0.0) - sj_cur.get((c, ch), 0.0))
+            w = w_all[c][ch]
+            a = actual[c][ch]
+            l_cur += float(np.sum(w * (np.minimum(
+                b0 + si_cur.get((c, ch), 0.0) + sj_cur.get((c, ch), 0.0), 60780.0) - a) ** 2))
+            l_new += float(np.sum(w * (np.minimum(
+                b0 + si_new.get((c, ch), 0.0) + sj_new.get((c, ch), 0.0), 60780.0) - a) ** 2))
+        if l_new < swap_ratio * l_cur:
+            tri, trj = truth_of(fi["mem"]), truth_of(fj["mem"])
+            wi = tri is not None and abs(ti0 - tri) <= CUT
+            wj = trj is not None and abs(tj0 - trj) <= CUT
+            apply_move(fi, tj0)
+            apply_move(fj, ti0)
+            swapped.add(id(fi)); swapped.add(id(fj))
+            stats["n_swapped"] += 1
+            for fk, tr, was in ((fi, tri, wi), (fj, trj, wj)):
+                stats["audit"].append({"op": "swap", "e": fk["e"], "truth": tr,
+                                       "was_ok": was,
+                                       "now_ok": (tr is not None
+                                                  and abs(fk["t0"] - tr) <= CUT)})
 
     # ---------- Q1-CLOSE: dissolve ridge families into a near neighbor ----------
     fam_info.sort(key=lambda f: f["t0"])
