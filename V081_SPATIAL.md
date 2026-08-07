@@ -1,5 +1,20 @@
 # v0.8.1 — spatial-score campaign (user's SPATIAL_SCORE.md design, tested on NERSC)
 
+## ADOPTED (2026-08-07): v0.8.1 = v0.8 canonical + `--pass2-light-nom`
+
+126-event confirmation (both metrics, energy-weighted):
+
+| chain | NS (<=1.4 GeV) | all-TPC |
+|---|---|---|
+| v0.8 canonical | 96.49 | 95.49 |
+| **v0.8.1 (+light-nominated candidates)** | **96.53** | **95.55** |
+
+Event record: NS 97 better / 23 worse; all-TPC **114 / 10**. Attribution is
+direct: 1,373 via-light trades (trades to families OUTSIDE the 8-nearest
+spatial candidate set, nominated by the cluster's own loss curve), truth
+audit **FIXED 740 / BROKE 164** (4.5 : 1), +3.9 GeV net. Cost ≈ +2 s/event.
+Tagged `v0.8.1`.
+
 *(2026-08-07. Reimplements the user's local design record
 `NDLAr-full/.claude/SPATIAL_SCORE.md` from spec — the trained artifacts never
 left the laptop — then extends it (v1.1 topology/reach, v1.2 neighbor-TPC)
