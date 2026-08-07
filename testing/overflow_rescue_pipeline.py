@@ -365,6 +365,9 @@ def main() -> int:
     ap.add_argument("--dump-dir", default="",
                     help="write per-event final-state npz (positions, labels, final ts, "
                          "backbone base image, own-images of the worst wrong labels)")
+    ap.add_argument("--evo", action="store_true",
+                    help="record per-cluster median t at every stage checkpoint "
+                         "(row['t_evo'] + dump key 't_evo'); read-only snapshots")
     ap.add_argument("--max-clip-ticks", type=int, default=None,
                     help="override the vAlpha saturation veto (default: config value 6)")
     ap.add_argument("--police", choices=["", "locked", "top18"], default="",
@@ -633,6 +636,17 @@ def main() -> int:
             hit_tpc = np.asarray(fs.event.hit_tpc_id)
             e_pos = np.clip(np.asarray(fs.event.energy, dtype=np.float64), 0.0, None)
 
+            # --evo: per-cluster median-t snapshot at each stage checkpoint
+            # (read-only — never touches the arrays it reads)
+            t_evo = {}
+            def _evo(stage, ts_arr):
+                if not args.evo:
+                    return
+                ts_a = np.asarray(ts_arr, dtype=np.float64)
+                okm = np.isfinite(ts_a) & (ts_a >= 0) & (labels_global >= 0)
+                t_evo[stage] = {int(l): round(float(np.median(ts_a[(labels_global == l) & okm])), 2)
+                                for l in np.unique(labels_global[okm])}
+
             truth = tp.extract_event_hit_energy_and_truth_t0(
                 h5, h5["charge/events/ref/charge/calib_prompt_hits/ref"], eventid=int(ev_id),
                 hits_full=h5["charge/calib_prompt_hits/data"], convert_to_matching_ticks=True)
@@ -870,6 +884,7 @@ def main() -> int:
                                         _ti_f, mode=args.police, topk=int(args.police_topk))
 
             tim["after_backbone"] = time.time() - t_ev
+            _evo("2+3.1_backbone_pool", hit_t0)
 
             # ---------- BASELINE pass ----------
             if args.skip_baseline:
@@ -1465,6 +1480,7 @@ def main() -> int:
                 hit_t0[:] = _ts_tmp.astype(hit_t0.dtype)
 
             tim["after_rescue_adopt"] = time.time() - t_ev
+            _evo("3.2_rescue_swap", hit_t0)
 
             # ========== STAGE 3.3 (P2 large-cluster scan + police) and ==========
             # ========== STAGE 3.5 (V2 spatial+light rescue + police)  ==========
@@ -1550,6 +1566,7 @@ def main() -> int:
                 ee_row["n_taken"] = len(_taken_ee)
                 ee_row["time_s"] = round(time.time() - t_ee, 2)
                 tim["after_early_expand"] = time.time() - t_ev
+                _evo("3.25_early_expand", ns1["hit_timestamps"])
 
             if not v2_variants:
                 m1 = staged_run(ns1, v2mod, v2cfg, _run_phase2, snapshot_backbone_hits_v11,
@@ -1611,6 +1628,7 @@ def main() -> int:
                 acc1, af1 = _ref["v2_acc"], _ref["v2_afrac"]
 
             tim["after_staged"] = time.time() - t_ev
+            _evo("3.3+3.5_p2_v2", ns1["hit_timestamps"])
 
             # ========== STAGE 3.9 (expansion) + STAGE 4 (Phase 3) ==========
             # ---------- v0.3.0 small-cluster stage (where Phase 3 lives) ----------
@@ -1658,6 +1676,7 @@ def main() -> int:
                         if int(cc) not in _taken_j]
                     p3_row["joint"] = st_j
                     tim["after_joint"] = time.time() - t_ev
+                    _evo("3.9_joint", ns1["hit_timestamps"])
                 if args.phase3 in ("expand", "both"):
                     if _HERE not in sys.path:
                         sys.path.insert(0, _HERE)
@@ -1687,6 +1706,7 @@ def main() -> int:
                     m1["p3e_new_efrac"] = float(e_pos[new_e].sum() / max(e_pos.sum(), 1e-9))
                     p3_row["expand"] = st_e
                     tim["after_expand"] = time.time() - t_ev
+                    _evo("3.9_expansion", ns1["hit_timestamps"])
                 if args.phase3 in ("matrix", "both", "joint"):
                     from v11_phased_matching import run_small_cluster_matrix_phase_v11
                     (p3_base, p3_ts, p3_cand, p3_ainfo, p3_unass, p3_log, _p3u,
@@ -1725,6 +1745,7 @@ def main() -> int:
                         "n_proposed": int(len(p3_log)),
                         "n_assigned": int(sum(1 for r in p3_log if r.get("assigned")))}
                     tim["after_matrix"] = time.time() - t_ev
+                    _evo("4.1_matrix", ns1["hit_timestamps"])
                     if args.matrix_relax:
                         # v0.7-a: keep the matrix propagating over the imaged
                         # tail (would-be force cohort) with light-loss increases
@@ -1789,6 +1810,7 @@ def main() -> int:
                         else:
                             p3_row["matrix_relax"] = {"n_work": 0}
                         tim["after_matrix_relax"] = time.time() - t_ev
+                        _evo("4.2_matrix_relax", ns1["hit_timestamps"])
                 # ---------- STAGE 4.5: per-TPC swap fix ----------
                 if args.pass2_trade:
                     if _HERE not in sys.path:
@@ -1813,6 +1835,7 @@ def main() -> int:
                     p3_row["pass2"] = st_p2
                     p3_row["pass2_audit"] = audit_p2
                     tim["after_pass2"] = time.time() - t_ev
+                    _evo("3.95_pass2_trade", ns1["hit_timestamps"])
                 if args.pass3_family:
                     if _HERE not in sys.path:
                         sys.path.insert(0, _HERE)
@@ -1830,6 +1853,7 @@ def main() -> int:
                     p3_row["pass3_family"] = st_p3f
                     p3_row["pass3_audit"] = audit_p3f
                     tim["after_pass3f"] = time.time() - t_ev
+                    _evo("3.97_pass3_family", ns1["hit_timestamps"])
                 if args.swap_fix:
                     if _HERE not in sys.path:
                         sys.path.insert(0, _HERE)
@@ -1849,6 +1873,7 @@ def main() -> int:
                     if args.cheat != "none":
                         _repin_ns(ns1)
                     tim["after_swap_fix"] = time.time() - t_ev
+                    _evo("4.5_swap_fix", ns1["hit_timestamps"])
                 if args.reassign:
                     if _HERE not in sys.path:
                         sys.path.insert(0, _HERE)
@@ -1882,6 +1907,7 @@ def main() -> int:
                     if args.cheat != "none":
                         _repin_ns(ns1)
                     tim["after_force"] = time.time() - t_ev
+                    _evo("4.9_force", ns1["hit_timestamps"])
                 if args.new_flash_rescue:
                     if _HERE not in sys.path:
                         sys.path.insert(0, _HERE)
@@ -1964,6 +1990,17 @@ def main() -> int:
                                      "tpcs": sorted(int(t) for t in
                                                     cluster_to_tpcs.get(int(lab), []))})
                 extra = {}
+                if args.evo:
+                    extra["t_evo"] = json.dumps(t_evo)
+                    try:
+                        extra["assign_stage"] = json.dumps(
+                            {f"{int(k[0])}_{int(k[1])}":
+                                {"t0": float(v.get("t0", -1.0)),
+                                 "stage": str(v.get("stage", v.get("mode", "?")))}
+                             for k, v in ns1["assignment_info"].items()
+                             if isinstance(k, tuple) and v.get("assigned")})
+                    except Exception as _ase:
+                        extra["assign_stage"] = json.dumps({"error": repr(_ase)})
                 worst = sorted((r for r in lab_rows if r["e_wrong"] > 100.0
                                 and r["e_wrong"] > 0.5 * r["e_ok"]),
                                key=lambda r: -r["e_wrong"])[:8]
@@ -2063,6 +2100,7 @@ def main() -> int:
                            **cheat_metrics(Scheat, ht_map,
                                            np.asarray(ns1["hit_timestamps"], np.float64))}),
                 "timing": tim, "stage_t": _stage_durations(tim),
+                "t_evo": (t_evo if args.evo else None),
                 "t_event_s": time.time() - t_ev,
                 "sigma_mode": args.sigma_mode, "z_cut": Z, "trig_rows": trig_rows,
                 "stay_margin": float(args.stay_margin), "cos_sel": float(args.cos_sel), "cos_window": float(args.cos_window), "group_diags": group_diags,
