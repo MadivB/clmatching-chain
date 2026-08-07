@@ -15,6 +15,26 @@ spatial candidate set, nominated by the cluster's own loss curve), truth
 audit **FIXED 740 / BROKE 164** (4.5 : 1), +3.9 GeV net. Cost ≈ +2 s/event.
 Tagged `v0.8.1`.
 
+## v0.8.2 exploration (2026-08-07): the loop is at a FIXED POINT — no adoption
+
+Three smarter-loop designs, all measured on file 0000001 vs v0.8.1
+(96.45 / 95.54), all flag-gated and kept available:
+
+| design | result |
+|---|---|
+| `--pass2-iterations 3` (fresh nominations each round from the traded base) | converged: rounds 2-3 add ~10 trades, metrics identical |
+| `--loop-p23 2` (full Q1↔Q2 alternation with per-round ledger) | round 2 = 11 trades + 2 closes / 13 ev; P3 ops FIXED 3 / BROKE 2; metrics identical |
+| `--pass2-light-prop` (symmetric dual: light proposes, spatial weak veto p≥0.15) | blocked cohort nearly empty: 45 trades, FIXED 13 / BROKE 7, NET NEGATIVE energy (29/35 MeV) |
+
+Conclusion: one pass of light-nominated trading already captures everything
+this operator family can reach — iteration, alternation, and symmetric
+proposal all find the same fixed point. **v0.8.1 remains canonical.**
+Remaining headroom lives OUTSIDE the loop: (1) merged two-interaction
+clusters — clustering-level, frontend; (2) saturation-degenerate light
+minima — loss shaping / unclipped channels; (3) the 8 % missing-slot
+cohort — OPEN operator; (4) sub-5 MeV placement — physics-limited per the
+confidence study.
+
 *(2026-08-07. Reimplements the user's local design record
 `NDLAr-full/.claude/SPATIAL_SCORE.md` from spec — the trained artifacts never
 left the laptop — then extends it (v1.1 topology/reach, v1.2 neighbor-TPC)
