@@ -416,6 +416,10 @@ def main() -> int:
     ap.add_argument("--pass2-margin", type=float, default=0.3)
     ap.add_argument("--pass2-pmin", type=float, default=0.6)
     ap.add_argument("--pass2-veto-frac", type=float, default=0.25)
+    ap.add_argument("--pass2-light-nom", action="store_true",
+                    help="v0.8.1: light-nominated trade candidates — add "
+                         "families whose t0 the cluster's own loss curve "
+                         "finds near-optimal to the 8-nearest spatial set")
     ap.add_argument("--pass2-iterations", type=int, default=1,
                     help="run PASS 2 trading this many times (Q2 re-asked on "
                          "the improved geometry)")
@@ -1823,6 +1827,7 @@ def main() -> int:
                             margin=float(args.pass2_margin),
                             p_min=float(args.pass2_pmin),
                             veto_frac=float(args.pass2_veto_frac),
+                            light_nominate=bool(args.pass2_light_nom),
                             truth_fn=_label_truth, verbose=False)
                         audit_p2 += st_p2.pop("audit", [])
                         if st_p2.get("n_traded", 0) == 0:
