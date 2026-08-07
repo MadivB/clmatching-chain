@@ -28,6 +28,33 @@ Backbone correction happens implicitly: a family move in PASS 3 carries its
 backbone members; a PASS 2 trade can pull a mis-clustered piece out of a
 backbone family.
 
+## Philosophy (user, 2026-08-06) — the two dual questions
+
+The reconstruction alternates two conditional questions until light closure:
+
+  Q1 (LIGHT, family level):   where does this family's t go — does its photon
+                              prediction match a flash?   [conditioned on the
+                              family's spatial cohesion]
+  Q2 (SPATIAL, cluster level): is cluster i "eating from another family's
+                              thing"?                     [conditioned on i's
+                              light loss a_i(t) at ALL families' times]
+
+Each answer is the other's prior; the objective is CLOSURE — predicted light
+resembling actual light through PHYSICALLY MEANINGFUL families (per-channel /
+per-tick resemblance, never a collapsed scalar — the v0.5.0 lesson).
+
+Four family-lifecycle operators, all truth-audited:
+
+| op | question | notes |
+|---|---|---|
+| MOVE  | Q1 | whole-family t shift / family<->family swap |
+| TRADE | Q2 | member reassignment, not 1:1 (PASS 2) |
+| OPEN  | Q2->Q1 | small blob's light demands an unregistered t0 |
+| CLOSE | Q1 | **ridge-flash dissolution**: a registered slot that is an
+              artifact on the shoulder of a real flash — remove the slot,
+              let the neighbor absorb its light, redistribute members.
+              NEW: the chain never handled spurious slots before. |
+
 ## The spatial score S(c, F) — requirements (user)
 
 1. **Multi-TPC with directionality**: understands what a shower IS (vertex,

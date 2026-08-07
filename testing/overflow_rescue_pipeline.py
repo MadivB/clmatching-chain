@@ -72,6 +72,7 @@ STAGE_CHECKPOINTS = [
     ("after_staged", "3.3+3.5_p2_v2_police"),
     ("after_expand", "3.9_expansion"),
     ("after_joint", "3.9_joint"),
+    ("after_pass2", "3.95_pass2_trade"),
     ("after_matrix", "4.1_matrix"),
     ("after_matrix_relax", "4.2_matrix_relax"),
     ("after_swap_fix", "4.5_swap_fix"),
@@ -403,6 +404,14 @@ def main() -> int:
     ap.add_argument("--frontend-params", default=None,
                     help="params json for the external front end "
                          "(default <repo>/params_full.json)")
+    ap.add_argument("--pass2-trade", action="store_true",
+                    help="v0.8 PASS 2: spatial cluster trading between reco "
+                         "families (v4 score + light-curve veto), after the "
+                         "light stages, before swap-fix")
+    ap.add_argument("--pass2-model", default=os.path.join(_HERE, "spatial_score_v4.joblib"))
+    ap.add_argument("--pass2-margin", type=float, default=0.3)
+    ap.add_argument("--pass2-pmin", type=float, default=0.6)
+    ap.add_argument("--pass2-veto-frac", type=float, default=0.25)
     ap.add_argument("--joint-tpc-emax", type=float, default=1400.0,
                     help="--phase3 joint: clusters in TPCs above this charge "
                          "energy [MeV] are left for the matrix (shower TPCs); "
@@ -1774,6 +1783,24 @@ def main() -> int:
                             p3_row["matrix_relax"] = {"n_work": 0}
                         tim["after_matrix_relax"] = time.time() - t_ev
                 # ---------- STAGE 4.5: per-TPC swap fix ----------
+                if args.pass2_trade:
+                    if _HERE not in sys.path:
+                        sys.path.insert(0, _HERE)
+                    from v080_pass2 import run_pass2_trading
+                    st_p2 = run_pass2_trading(
+                        ns1, model_path=args.pass2_model,
+                        margin=float(args.pass2_margin),
+                        p_min=float(args.pass2_pmin),
+                        veto_frac=float(args.pass2_veto_frac),
+                        truth_fn=_label_truth, verbose=False)
+                    audit_p2 = st_p2.pop("audit", [])
+                    st_p2["n_fixed"] = sum(1 for a in audit_p2
+                                           if not a.get("was_ok") and a.get("now_ok"))
+                    st_p2["n_broke"] = sum(1 for a in audit_p2
+                                           if a.get("was_ok") and not a.get("now_ok"))
+                    p3_row["pass2"] = st_p2
+                    p3_row["pass2_audit"] = audit_p2
+                    tim["after_pass2"] = time.time() - t_ev
                 if args.swap_fix:
                     if _HERE not in sys.path:
                         sys.path.insert(0, _HERE)
