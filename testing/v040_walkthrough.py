@@ -1,15 +1,16 @@
-"""Step-by-step v0.4.0 walkthrough engine for the notebook
+"""Step-by-step v0.8.1 walkthrough engine for the notebook
 (v040_step_by_step.ipynb).
 
-Runs the FULL v0.4.0 chain on one event (whole ND, algorithm unchanged) while
+Runs the FULL v0.8.1 chain on one event (whole ND, algorithm unchanged) while
 firing a display callback every time the watched TPC's predicted light (base
 image) is updated.  The callback receives (stage, note, base_view) — the
 notebook draws the usual 2D light+charge display and an inline 3D
 reconstructed view at each checkpoint.
 
-Stage map (canonical v0.4.1 flags: stack2 backbone + MERGED 3.1/3.3 pool
-(--merge-p2), poisson trigger, veto-4, police locked, merge-vertex, phase3
-both + force, plain expansion score, swap 0.85, boundary 30, predict >= 1.5):
+Stage map (canonical v0.8.1 flags: stack2 backbone + MERGED 3.1/3.3 pool
+(--merge-p2), poisson trigger, veto-4, police locked, merge-vertex, external
+frontend, phase3 JOINT + PASS 2 light-nominated trading + force, swap 0.85,
+boundary 30, predict >= 1.5):
   1        clustering & ML prediction (inside the first-stage call)
   2        Phase 1: showers + >=3-TPC tracks (per-placement checkpoints)
   3.1      MERGED permutation pool: 1-2-TPC backbone tracks + every P2-class
@@ -18,8 +19,9 @@ both + force, plain expansion score, swap 0.85, boundary 30, predict >= 1.5):
   3.2      trigger + saving on the full model (per-ADOPT checkpoints)
   3.3      Phase-2 scan for what 3.2 detached + police
   3.5      V2 spatial+light rescue + police
-  3.9      family expansion, plain clipped-Poisson score (per-assignment)
-  4.1      error matrix     (stage checkpoint)
+  3.9      JOINT mean-field assignment, TPCs <= 1.4 GeV (per-winner replay)
+  4.1      error matrix for the leftovers (stage checkpoint)
+  3.95     PASS 2 spatial trading + light-nominated candidates (per-trade)
   4.5      per-TPC swap fix (stage checkpoint)
   4.9      force coverage   (stage checkpoint)
 """
@@ -731,43 +733,66 @@ def _moved_in_watch(S, ts_a, ts_b):
 
 
 # ---------------------------------------------------------------------------
-def smallcluster_stage(S, cb: Callable):
-    """Expansion (per-assignment replay) -> matrix -> swap fix -> force."""
-    _ensure_here()
-    from v030_expansion import run_family_expansion, force_full_coverage
-    from swap_fix import run_swap_correction
-    ns, ctx = S["ns"], S["ctx"]
+def _shift_img(img, t0):
+    sft = np.zeros_like(img)
+    s0 = int(round(t0))
+    if 0 <= s0 < img.shape[1]:
+        sft[:, s0:] = img[:, :img.shape[1] - s0]
+    return sft
 
+
+def smallcluster_stage(S, cb: Callable):
+    """v0.8.1: JOINT solver -> matrix -> PASS 2 (light-nom) -> swap fix -> force."""
+    _ensure_here()
+    from v030_expansion import force_full_coverage
+    from v070_joint import run_joint_assignment
+    from v080_pass2 import run_pass2_trading
+    from swap_fix import run_swap_correction
+    from M5p1.first_stage_matching.track_stage import append_candidate_t0
+    ns, ctx = S["ns"], S["ctx"]
+    n_light = int(np.asarray(ns["baseImage"]).shape[0])
+
+    # ---- 3.9 JOINT mean-field assignment (hybrid: TPCs <= 1.4 GeV) ----
     t0 = time.perf_counter()
     base_before = np.asarray(ns["baseImage"], np.float32)[S["watch"]].copy()
-    st_e = run_family_expansion(ns, verbose=False, params={"PLAIN_SCORE": True})
-    _tick(S, "3.9 family expansion (plain score)", t0)
-    frames = [a for a in st_e.get("assigned", [])
-              if S["watch"] in S["cluster_to_tpcs"].get(a["label"], [])]
+    st_j = run_joint_assignment(ns, verbose=False,
+                                params={"TPC_E_MAX": 1400.0})
+    _tick(S, "3.9 joint assignment", t0)
     view = base_before.copy()
-    for a in frames:
-        key = (int(a["label"]), S["watch"])
-        if key in S["image_maps"]:
-            img = np.asarray(S["image_maps"][key], np.float64)
-            sft = np.zeros_like(img)
-            s0 = int(round(a["t0"]))
-            if 0 <= s0 < img.shape[1]:
-                sft[:, s0:] = img[:, :img.shape[1] - s0]
-            view = view + sft.astype(np.float32)
-        cb("3.9 expansion", f"family {a['fam']} absorbed cluster {a['label']} "
-           f"(E={a['e']:.1f} MeV) at t0={a['t0']:.0f} | score {a['score']:.2f}, "
-           f"d_geo {a['d_geo']:.1f} cm (truth={label_truth(S, a['label'])})",
-           base_view=view.copy())
-    taken = set(st_e.get("member_labels", []))
+    for a in st_j.get("assigned", []):
+        lab, t0j = int(a["label"]), float(a["t0"])
+        for c in S["cluster_to_tpcs"].get(lab, []):
+            c = int(c)
+            if c >= n_light or (lab, c) not in ns["imageMaps"]:
+                continue
+            append_candidate_t0(ns["t0Candidates"][c], t0j, min_sep=2,
+                                max_t0=SEARCH)
+            while len(ns["flash_cluster_received_by_tpc"][c]) < \
+                    len(ns["t0Candidates"][c]):
+                ns["flash_cluster_received_by_tpc"][c].append(False)
+            ns["assignment_info"][(lab, c)] = {
+                "clusterid": lab, "tpcid": c, "t0": t0j, "mode": "joint",
+                "stage": "joint", "assigned": True, "energy": float(a["e"])}
+        if S["watch"] in S["cluster_to_tpcs"].get(lab, []):
+            key = (lab, S["watch"])
+            if key in S["image_maps"]:
+                view = view + _shift_img(
+                    np.asarray(S["image_maps"][key], np.float64),
+                    t0j).astype(np.float32)
+            cb("3.9 joint", f"joint placed cluster {lab} (E={a['e']:.1f} MeV) "
+               f"at t0={t0j:.0f} | q_max {a['q_max']:.2f}, connected="
+               f"{a['connected']} (truth={label_truth(S, lab)})",
+               base_view=view.copy())
+    taken = set(st_j.get("member_labels", []))
     for k in ("v11_iterative_single_tpc", "unassigned_by_tpc"):
         for tk, lst in list(ns[k].items()):
             ns[k][tk] = [cc for cc in lst if int(cc) not in taken]
     ns["v11_pruned_iterative_clusters"] = [
         cc for cc in ns.get("v11_pruned_iterative_clusters", [])
         if int(cc) not in taken]
-    cb("3.9 expansion done", f"assigned {st_e['n_assigned']} clusters "
-       f"({st_e['e_assigned']:.0f} MeV) event-wide; dissents {st_e['dissents']}, "
-       f"ejections {st_e['ejections']}, new t0s {st_e['new_t0']}", force=True)
+    cb("3.9 joint done", f"joint assigned {len(st_j.get('assigned', []))} "
+       f"clusters event-wide ({st_j.get('n_pairs', 0)} pair couplings, "
+       f"{st_j.get('sweeps', 0)} sweeps)", force=True)
 
     t0 = time.perf_counter()
     (p3b, p3t, p3c, p3a, p3u, p3l, _u, _s) = ctx["run_matrix"](
@@ -791,6 +816,35 @@ def smallcluster_stage(S, cb: Callable):
     _tick(S, "4.1 error-matrix Phase 3", t0)
     cb("4.1 error matrix", f"matrix proposed {len(p3l)}, assigned "
        f"{sum(1 for r in p3l if r.get('assigned'))} event-wide", force=True)
+
+    # ---- 3.95 PASS 2: spatial trading with light-nominated candidates ----
+    t0 = time.perf_counter()
+    st_p2 = run_pass2_trading(
+        ns, model_path=os.path.join(_HERE, "spatial_score_v4.joblib"),
+        light_nominate=True, truth_fn=lambda l: label_truth(S, l),
+        verbose=False)
+    _tick(S, "3.95 PASS 2 trading (light-nom)", t0)
+    view = np.asarray(ns["baseImage"], np.float32)[S["watch"]].copy()
+    for a in st_p2.get("audit", []):
+        lab = int(a["label"])
+        if S["watch"] not in S["cluster_to_tpcs"].get(lab, []):
+            continue
+        key = (lab, S["watch"])
+        if key in S["image_maps"]:
+            img = np.asarray(S["image_maps"][key], np.float64)
+            view = np.clip(view - _shift_img(img, a["from_t"])
+                           + _shift_img(img, a["to_t"]), 0, None
+                           ).astype(np.float32)
+        why = "LIGHT-nominated" if a.get("via_light") else "spatial"
+        ok = ("FIX" if (not a.get("was_ok") and a.get("now_ok")) else
+              "BREAK" if (a.get("was_ok") and not a.get("now_ok")) else "~")
+        cb("3.95 PASS 2 trade", f"cluster {lab} (E={a['e']:.1f} MeV) traded "
+           f"{a['from_t']:.0f} -> {a['to_t']:.0f} [{why}] "
+           f"(truth={a.get('truth')}, {ok})", base_view=view.copy())
+    cb("3.95 PASS 2 done", f"trades {st_p2['n_traded']} event-wide "
+       f"(via light nomination {st_p2.get('n_traded_via_light', 0)}, "
+       f"vetoed {st_p2['n_vetoed']}; scored {st_p2['n_scored']} of "
+       f"{st_p2['n_considered']} small clusters)", force=True)
 
     t0 = time.perf_counter()
     st_sw = run_swap_correction(ns, hit_tpc=S["hit_tpc"], cluster_to_tpcs=S["cluster_to_tpcs"],
