@@ -37,6 +37,26 @@ mode is extinct. The good coverage-for-accuracy trade remains v0.8.3
 (spatial+light coincidence, 44-75 % purity). Real lever: better small-
 cluster light templates (small Charge2Light retrain).
 
+### The definition of "tiny" (2026-08-12): the light-information boundary
+
+Three independent measurements agree (180k-cluster feature table with
+per-energy-bin AUC of the light features vs wrongness; the support-channel
+study k*(E) = 27.6·log10 E − 36; the decline-audit exemption replay):
+
+| band | light-regret dz AUC | reliable channels k* | meaning |
+|---|---|---|---|
+| E < 3 MeV | 0.46–0.52 (≤ chance; 1–2 MeV ANTI-informative) | 0 | **light-blind** |
+| 3–20 MeV | 0.55–0.64 | < 1 | weak prior only — never a trigger/veto |
+| E ≥ 20 MeV | 0.72+ | ≥ 1 (k*=0 crossing at 20.2 MeV) | **light-judgeable** |
+
+Recommended thresholds: **E_tiny = 5 MeV** — neglect clusters below this in
+any light-driven DECISION (trigger, veto, decline); **E_trust = 20 MeV** —
+the template is well-supported (matches the k* crossing to within a MeV).
+The decline replay confirms the deeper point: no energy cut rescues a
+fits-nowhere trigger — above 5 MeV its purity is 0 % because misplaced
+clusters by definition fit well SOMEWHERE (low r — the PASS-2 nomination
+signal); fits-nowhere = broken template, at every energy.
+
 ## v0.8.3 (2026-08-11): confidence-based HIT PRUNING — adopted as an output mode
 
 A charge+light "badness" score per assigned cluster (29 v4 spatial features
