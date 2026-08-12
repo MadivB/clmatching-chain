@@ -368,6 +368,12 @@ def main() -> int:
     ap.add_argument("--evo", action="store_true",
                     help="record per-cluster median t at every stage checkpoint "
                          "(row['t_evo'] + dump key 't_evo'); read-only snapshots")
+    ap.add_argument("--prune-frac", type=float, default=0.0,
+                    help="v0.8.3: confidence-prune this fraction of assigned "
+                         "hits at end of chain (charge+light badness model; "
+                         "stats in row['prune']; headline metrics unchanged)")
+    ap.add_argument("--prune-model", default=os.path.join(
+        _HERE, "v083_prune_model.joblib"))
     ap.add_argument("--max-clip-ticks", type=int, default=None,
                     help="override the vAlpha saturation veto (default: config value 6)")
     ap.add_argument("--police", choices=["", "locked", "top18"], default="",
@@ -2040,6 +2046,28 @@ def main() -> int:
             m1["ns_efrac"] = float(e_pos[mask_ns].sum() / max(e_pos.sum(), 1e-9))
 
             ts_fin = np.asarray(ns1["hit_timestamps"], dtype=np.float64)
+
+            # ---- v0.8.3 (optional): confidence pruning of assigned hits ----
+            row_prune = None
+            if args.prune_frac > 0:
+                try:
+                    if _HERE not in sys.path:
+                        sys.path.insert(0, _HERE)
+                    from v083_prune import prune_event
+                    from confidence_cluster import cluster_scores as _pr_cs
+                    _conf_pr = _pr_cs(labels_global, hit_tpc,
+                                      np.asarray(fs.event.y, np.float64),
+                                      e_pos, ts_fin, actual,
+                                      np.asarray(ns1["baseImage"], np.float64))
+                    row_prune = prune_event(
+                        dict(x=np.asarray(fs.event.x), y=np.asarray(fs.event.y),
+                             z=np.asarray(fs.event.z), e=e_pos, tpc=hit_tpc,
+                             labels=labels_global, ts_final=ts_fin,
+                             truth_t0=truth_t0),
+                        _conf_pr, args.prune_model, float(args.prune_frac))
+                except Exception as _pe:
+                    row_prune = {"error": repr(_pe)}
+
             if args.dump_dir:
                 lab_rows = []
                 for lab in np.unique(labels_global[labels_global >= 0]):
@@ -2170,6 +2198,7 @@ def main() -> int:
                                            np.asarray(ns1["hit_timestamps"], np.float64))}),
                 "timing": tim, "stage_t": _stage_durations(tim),
                 "t_evo": (t_evo if args.evo else None),
+                "prune": row_prune,
                 "t_event_s": time.time() - t_ev,
                 "sigma_mode": args.sigma_mode, "z_cut": Z, "trig_rows": trig_rows,
                 "stay_margin": float(args.stay_margin), "cos_sel": float(args.cos_sel), "cos_window": float(args.cos_window), "group_diags": group_diags,
