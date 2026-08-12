@@ -15,6 +15,30 @@ spatial candidate set, nominated by the cluster's own loss curve), truth
 audit **FIXED 740 / BROKE 164** (4.5 : 1), +3.9 GeV net. Cost ≈ +2 s/event.
 Tagged `v0.8.1`.
 
+## v0.8.3 (2026-08-11): confidence-based HIT PRUNING — adopted as an output mode
+
+A charge+light "badness" score per assigned cluster (29 v4 spatial features
+vs its own reco family + light confidence z_min / z_own / regret dz /
+chi2_loc / n_tpc + basics), HGB, leave-one-file-out — every score
+out-of-sample.  Pruned clusters get t = −1; headline forced-coverage
+metrics unchanged; `--prune-frac F` records row["prune"].
+
+Assigned-hit accuracy (energy-weighted) vs pruned hit fraction:
+
+| substrate | 0 % | 0.5 % | **1 %** | 2 % | OOS AUC |
+|---|---|---|---|---|---|
+| v0.6 dumps, 126 ev (NS) | 95.99 | 96.40 | **96.81** | 97.47 | 0.855 |
+| v0.8 dumps, file 1 (NS, transfer) | 96.46 | 96.83 | **97.10** | 97.59 | 0.828 |
+
+Prune purity at 1 %: 75 % (v0.6) / 60 % (v0.8) of pruned energy truly wrong
+— ~20× enrichment over the ~3 % base rate.  Feature importances split
+exactly as designed: energy first (logE +0.070 — small clusters carry the
+error), then spatial orphan-ness (best_lat, best_gap, d_eu), then the light
+block (z_min, z_own, dz, chi2_loc).  Artifacts:
+`testing/v083_prune.py` (study + `prune_event`), `testing/v083_prune_model.joblib`
+(deploy HGB + calibrated global thresholds 0.25/0.5/1/2 %),
+`testing/v083_prune_rows.npz`.
+
 ## v0.8.2 exploration (2026-08-07): the loop is at a FIXED POINT — no adoption
 
 Three smarter-loop designs, all measured on file 0000001 vs v0.8.1
