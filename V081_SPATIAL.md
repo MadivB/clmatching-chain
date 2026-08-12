@@ -49,13 +49,34 @@ study k*(E) = 27.6·log10 E − 36; the decline-audit exemption replay):
 | 3–20 MeV | 0.55–0.64 | < 1 | weak prior only — never a trigger/veto |
 | E ≥ 20 MeV | 0.72+ | ≥ 1 (k*=0 crossing at 20.2 MeV) | **light-judgeable** |
 
-Recommended thresholds: **E_tiny = 5 MeV** — neglect clusters below this in
-any light-driven DECISION (trigger, veto, decline); **E_trust = 20 MeV** —
-the template is well-supported (matches the k* crossing to within a MeV).
-The decline replay confirms the deeper point: no energy cut rescues a
-fits-nowhere trigger — above 5 MeV its purity is 0 % because misplaced
-clusters by definition fit well SOMEWHERE (low r — the PASS-2 nomination
-signal); fits-nowhere = broken template, at every energy.
+Information boundaries (measured facts, used only to PROTECT small clusters
+from light-driven decisions — nothing is discarded by them): light-blind
+below ~3–5 MeV, weak prior 3–20 MeV, trustworthy ≥ 20 MeV (k* crossing at
+20.2 MeV).  The decline replay confirms the deeper point: no energy cut
+rescues a fits-nowhere trigger — above 5 MeV its purity is 0 % because
+misplaced clusters by definition fit well SOMEWHERE (low r — the PASS-2
+nomination signal); fits-nowhere = broken template, at every energy.
+
+### NEUTRON-PHYSICS CONSTRAINT (user, 2026-08-12): the discard threshold
+
+Small-energy neutron deposits (recoils / capture gammas, ~0.5–6 MeV, e.g.
+5 MeV) MUST remain assigned — and they share the exact pruning signature
+(small, isolated, light-invisible).  Measured conflict: under the previous
+E < 3 MeV rule, **100 % of the pruned energy sat in the 1–10 MeV neutron
+band**.  Neutron-safe re-tune (files 1–8 tune / 9–10 test):
+
+| discard gate | hit frac | NS assigned acc | purity | pruned E in 1–10 MeV |
+|---|---|---|---|---|
+| E < 3 (old) | 0.59 % | 96.68 → 97.18 | 47 % | **100 %** |
+| **E < 1 (new default)** | 0.06 % | 96.68 → 96.73 | 57 % | **0 %** |
+
+**Default `v083_prune_cuts.json` is now the E < 1 MeV rule** — deposits
+≥ 1 MeV are never unassigned; the aggressive rule survives as
+`v083_prune_cuts_e3_nonneutron.json` for analyses without neutron signal.
+Consequence accepted: with the neutron band protected, pruning-as-removal
+is nearly powerless (+0.05 pp).  The badness score's real product is the
+per-cluster QUALITY FLAG shipped alongside the assignment — analyses choose
+their own trade; neutron analyses keep everything.
 
 ## v0.8.3 (2026-08-11): confidence-based HIT PRUNING — adopted as an output mode
 
