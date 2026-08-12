@@ -15,6 +15,28 @@ spatial candidate set, nominated by the cluster's own loss curve), truth
 audit **FIXED 740 / BROKE 164** (4.5 : 1), +3.9 GeV net. Cost ≈ +2 s/event.
 Tagged `v0.8.1`.
 
+## v0.8.4 side path (2026-08-12): decline-or-repair — NULL, with a physics lesson
+
+Post-force audit of small imaged clusters: r = best-case light delta-loss /
+template norm; if r > r_max, try a local permutation pool over
+support-channel neighbours (shifts 0/±6/±12), else unassign (-10000).
+File 0000001 scan (assigned-hit E-weighted acc / assigned fraction):
+
+| config | NS acc | NS frac | trig | declined | purity |
+|---|---|---|---|---|---|
+| v0.8.1 | 96.45 | 100.00 | — | — | — |
+| r=0.75 | 96.45 | 99.97 | 44 | 41 (180 MeV) | 10 % |
+| r=0.50 | 96.44 | 99.96 | 58 | 57 (250 MeV) | 16 % |
+| r=0.25 | 96.44 | 99.94 | 76 | 72 (334 MeV) | 21 % |
+
+Verdict: NOT adopted. "Worsens the light everywhere" selects bad TEMPLATES,
+not bad placements — 80-90 % of declined clusters were correctly placed
+(ML light-prediction systematics on tiny clusters). Mitigation pools found
+0-1 real fixes: third independent confirmation that the blocked-spot failure
+mode is extinct. The good coverage-for-accuracy trade remains v0.8.3
+(spatial+light coincidence, 44-75 % purity). Real lever: better small-
+cluster light templates (small Charge2Light retrain).
+
 ## v0.8.3 (2026-08-11): confidence-based HIT PRUNING — adopted as an output mode
 
 A charge+light "badness" score per assigned cluster (29 v4 spatial features
