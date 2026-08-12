@@ -368,6 +368,11 @@ def main() -> int:
     ap.add_argument("--evo", action="store_true",
                     help="record per-cluster median t at every stage checkpoint "
                          "(row['t_evo'] + dump key 't_evo'); read-only snapshots")
+    ap.add_argument("--decline-r", type=float, default=0.0,
+                    help="v0.8.4: after force, audit small imaged clusters; "
+                         "if best-case light delta-loss / template-norm > r, "
+                         "try support-channel permutation repair, else "
+                         "unassign (-10000). 0 = off")
     ap.add_argument("--prune-frac", type=float, default=0.0,
                     help="v0.8.3: confidence-prune this fraction of assigned "
                          "hits at end of chain (charge+light badness model; "
@@ -1985,6 +1990,28 @@ def main() -> int:
                         _repin_ns(ns1)
                     tim["after_force"] = time.time() - t_ev
                     _evo("4.9_force", ns1["hit_timestamps"])
+                if args.decline_r > 0:
+                    # ---- v0.8.4: decline-or-repair for the small tail ----
+                    if _HERE not in sys.path:
+                        sys.path.insert(0, _HERE)
+                    from v084_decline import run_decline
+                    t_dc = time.time()
+                    st_dc = run_decline(ns1, r_max=float(args.decline_r),
+                                        truth_fn=_label_truth, verbose=False)
+                    aud_dc = st_dc.pop("audit", [])
+                    st_dc["declined_wrong"] = sum(
+                        1 for a in aud_dc if a.get("declined") and not a["was_ok"])
+                    st_dc["declined_right"] = sum(
+                        1 for a in aud_dc if a.get("declined") and a["was_ok"])
+                    st_dc["mit_fixed"] = sum(
+                        1 for a in aud_dc if not a.get("declined")
+                        and not a["was_ok"] and a.get("now_ok"))
+                    st_dc["mit_broke"] = sum(
+                        1 for a in aud_dc if not a.get("declined")
+                        and a["was_ok"] and not a.get("now_ok"))
+                    st_dc["time_s"] = round(time.time() - t_dc, 2)
+                    p3_row["decline"] = st_dc
+                    p3_row["decline_audit"] = aud_dc
                 if args.new_flash_rescue:
                     if _HERE not in sys.path:
                         sys.path.insert(0, _HERE)
@@ -2045,6 +2072,10 @@ def main() -> int:
             good_ns = ok_ns & asg_ns & (np.abs(ts_now - truth_t0) <= CUT)
             m1["ns_total_eff"] = float(e_pos[good_ns].sum() / max(e_pos[ok_ns].sum(), 1e-9))
             m1["ns_coverage"] = float(e_pos[asg_ns].sum() / max(e_pos[mask_ns].sum(), 1e-9))
+            m1["ns_assigned_acc"] = float(
+                e_pos[good_ns].sum() / max(e_pos[ok_ns & asg_ns].sum(), 1e-9))
+            m1["ns_assigned_efrac"] = float(
+                e_pos[ok_ns & asg_ns].sum() / max(e_pos[ok_ns].sum(), 1e-9))
             m1["ns_efrac"] = float(e_pos[mask_ns].sum() / max(e_pos.sum(), 1e-9))
 
             ts_fin = np.asarray(ns1["hit_timestamps"], dtype=np.float64)
