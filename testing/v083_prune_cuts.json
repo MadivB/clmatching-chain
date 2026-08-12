@@ -1,0 +1,3 @@
+{"mode": "cuts", "E_max_mev": 3.0, "sp_feat": "d_eu", "sp_min_cm": 15.0,
+ "dz_min": 1.0, "z_own_min": 0.0, "min_votes": 2,
+ "note": "v0.8.3 prune rule: E < 3 MeV AND >=2 of [d_eu>15cm spatial orphan, dz>1 light regret, z_own>0 no light support]; ~1.3% of assigned hits"}

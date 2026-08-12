@@ -373,7 +373,9 @@ def main() -> int:
                          "hits at end of chain (charge+light badness model; "
                          "stats in row['prune']; headline metrics unchanged)")
     ap.add_argument("--prune-model", default=os.path.join(
-        _HERE, "v083_prune_model.joblib"))
+        _HERE, "v083_prune_cuts.json"),
+                    help=".json = 4-threshold cuts rule (default, data-"
+                         "auditable); .joblib = the 40-feature HGB bundle")
     ap.add_argument("--max-clip-ticks", type=int, default=None,
                     help="override the vAlpha saturation veto (default: config value 6)")
     ap.add_argument("--police", choices=["", "locked", "top18"], default="",

@@ -137,21 +137,38 @@ _PRUNE_MD = {}
 
 
 def prune_event(ev, conf, model_path, frac):
-    """In-chain post-filter: score every assigned cluster, prune those over
-    the calibrated global threshold for `frac`.  Returns stats + the pruned
-    label list (the caller decides whether to actually blank ts)."""
+    """In-chain post-filter.  model_path ending in .json = the 4-threshold
+    CUTS rule (data-auditable, the default); otherwise the HGB bundle with
+    calibrated global thresholds.  Returns stats + the pruned label list
+    (the caller decides whether to actually blank ts)."""
     if model_path not in _PRUNE_MD:
-        _PRUNE_MD[model_path] = joblib.load(model_path)
+        if model_path.endswith(".json"):
+            _PRUNE_MD[model_path] = json.load(open(model_path))
+        else:
+            _PRUNE_MD[model_path] = joblib.load(model_path)
     bd = _PRUNE_MD[model_path]
     rows = cluster_rows(ev, conf)
     if not rows:
         return {"n_clusters": 0, "n_pruned": 0, "pruned_labels": []}
     X = np.array([r["x"] for r in rows], float)
-    p = bd["model"].predict_proba(X)[:, 1]
-    fkey = min(bd["thresholds"], key=lambda k: abs(float(k) - float(frac)))
-    thr = float(bd["thresholds"][fkey])
-    keep = [r for r, pi in zip(rows, p) if pi < thr]
-    prun = [r for r, pi in zip(rows, p) if pi >= thr]
+    if bd.get("mode") == "cuts":
+        iE = ALL_FEATS.index("logE")
+        isp = ALL_FEATS.index(bd["sp_feat"])
+        idz, izo = ALL_FEATS.index("dz"), ALL_FEATS.index("z_own")
+        with np.errstate(invalid="ignore"):
+            votes = ((X[:, isp] > bd["sp_min_cm"]).astype(int)
+                     + (X[:, idz] > bd["dz_min"])
+                     + (X[:, izo] > bd["z_own_min"]))
+            pmask = (10 ** X[:, iE] < bd["E_max_mev"]) & \
+                    (votes >= int(bd["min_votes"]))
+        thr, fkey = None, None
+    else:
+        p = bd["model"].predict_proba(X)[:, 1]
+        fkey = min(bd["thresholds"], key=lambda k: abs(float(k) - float(frac)))
+        thr = float(bd["thresholds"][fkey])
+        pmask = p >= thr
+    keep = [r for r, pi in zip(rows, pmask) if not pi]
+    prun = [r for r, pi in zip(rows, pmask) if pi]
 
     def acc(rs):
         te = sum(r["e_tr"] for r in rs)
@@ -162,14 +179,14 @@ def prune_event(ev, conf, model_path, frac):
         "frac_hits_pruned": round(sum(r["nh"] for r in prun)
                                   / max(sum(r["nh"] for r in rows), 1), 5),
         "e_pruned": round(sum(r["e"] for r in prun), 1),
-        "thr": thr, "thr_frac_key": float(fkey),
+        "thr": thr, "thr_frac_key": (float(fkey) if fkey is not None else None),
         "acc_before_all": acc(rows), "acc_after_all": acc(keep),
         "acc_before_ns": acc([r for r in rows if r["ns"]]),
         "acc_after_ns": acc([r for r in keep if r["ns"]]),
         "prune_purity": (round(sum(r["e_tr"] - r["e_good"] for r in prun)
                                / max(sum(r["e_tr"] for r in prun), 1e-9), 3)
                          if prun else None),
-        "pruned_labels": [r["label"] for r in prun][:300]}
+        "pruned_labels": [r["label"] for r in prun][:2000]}
 
 
 def main():
