@@ -15,6 +15,25 @@ spatial candidate set, nominated by the cluster's own loss curve), truth
 audit **FIXED 740 / BROKE 164** (4.5 : 1), +3.9 GeV net. Cost ≈ +2 s/event.
 Tagged `v0.8.1`.
 
+## v0.8.6 (2026-08-14): the speed release — 115 s/event single-node latency, target MET
+
+v0.8.6 = v0.8.5 (4x-smaller amplitude perceiver) + `--skip-v2`.
+The V2 rescue stage (38-53 s/ev) is FULLY SUPERSEDED by joint+PASS 2:
+126-event confirmation vs the v0.8.1 canonical ledger:
+
+| chain | NS | all-TPC | wall (8-worker) | node-throughput | 1-worker latency |
+|---|---|---|---|---|---|
+| v0.8.1 (big, +V2) | 96.53 | 95.55 | 232 s/ev | 29 s/ev | ~190 s/ev |
+| **v0.8.6 (small, no V2)** | 96.47 | **95.60** | **147 s/ev** | **18.4 s/ev** | **115 s/ev** |
+
+NS delta -0.06pp at a PERFECT 63/63 event split (pure noise; contrast the
+114/10 splits of real adoptions); all-TPC +0.05 (71/55). The user's
+<=120 s/event single-node requirement is met (probe: 176/44/67/174 s,
+mean 115). Rejected on the way: `--fast-track-stage` (saves 5 s, costs
+-0.32pp all-TPC — the track-stage refinements feed t0/flash quality
+downstream). Next latency levers if ever needed: matrix tail (19 s),
+backbone+pool (18 s), force (10 s).
+
 ## v0.8.4 side path (2026-08-12): decline-or-repair — NULL, with a physics lesson
 
 Post-force audit of small imaged clusters: r = best-case light delta-loss /
