@@ -299,7 +299,7 @@ def make_police(actual, veto_mask, e_pos, support_cache, label_info, ti_fn,
 
 
 def staged_run(ns, v2mod, v2cfg, run_phase2, snapshot_fn, verify_fn, truth_t0, e_pos, tag,
-               police=None):
+               police=None, skip_v2=False):
     """Phase 2 then V2 with cohort decomposition. Returns metrics dict."""
     ts1 = np.asarray(ns["hit_timestamps"], dtype=np.float64).copy()
     A1 = np.isfinite(ts1) & (ts1 >= 0)
@@ -317,9 +317,10 @@ def staged_run(ns, v2mod, v2cfg, run_phase2, snapshot_fn, verify_fn, truth_t0, e
     m["p2_acc"], m["p2_afrac"] = accuracy(ts2, truth_t0, e_pos)
     m["p2_acc_A1"], _ = accuracy(ts2, truth_t0, e_pos, mask=A1)
     m["p2_acc_new"], _ = accuracy(ts2, truth_t0, e_pos, mask=A2 & ~A1)
-    v2mod.run_trial2_v2_light_rescue_from_namespace(ns, config=v2cfg, commit=True)
-    if police is not None:
-        m["police_v2"] = police(ns, ts2, f"v2({tag})")
+    if not skip_v2:
+        v2mod.run_trial2_v2_light_rescue_from_namespace(ns, config=v2cfg, commit=True)
+        if police is not None:
+            m["police_v2"] = police(ns, ts2, f"v2({tag})")
     ts3 = np.asarray(ns["hit_timestamps"], dtype=np.float64).copy()
     m["v2_acc"], m["v2_afrac"] = accuracy(ts3, truth_t0, e_pos)
     m["v2_acc_A1"], _ = accuracy(ts3, truth_t0, e_pos, mask=A1)
@@ -368,6 +369,13 @@ def main() -> int:
     ap.add_argument("--evo", action="store_true",
                     help="record per-cluster median t at every stage checkpoint "
                          "(row['t_evo'] + dump key 't_evo'); read-only snapshots")
+    ap.add_argument("--skip-v2", action="store_true",
+                    help="speed: skip the V2 rescue stage (~38-50 s/ev) — "
+                         "candidate superseded by joint+PASS2")
+    ap.add_argument("--fast-track-stage", action="store_true",
+                    help="speed: disable superseded track-stage refinements "
+                         "(second-pass rescan, overlap swap, fine correction)"
+                         " — stack2 re-places the backbone anyway")
     ap.add_argument("--light-ckpt", default="",
                     help="override the amplitude-perceiver checkpoint (e.g. "
                          "the 4x-smaller ndfull_small4x model; arch read "
@@ -565,6 +573,11 @@ def main() -> int:
         # the loader reads the checkpoint's "arch" dict when present
         cfg.model.light_checkpoint = args.light_ckpt
         print(f"light checkpoint override -> {args.light_ckpt}", flush=True)
+    if args.fast_track_stage:
+        cfg.track_stage.enable_second_pass_rescan = False
+        cfg.track_stage.enable_overlap_swap = False
+        cfg.track_stage.enable_fine_correction = False
+        print("fast track stage: rescan/overlap-swap/fine-correction OFF", flush=True)
     cfg.prediction.min_cluster_energy_mev = 50.0
     if args.phase3 != "none":
         cfg.prediction.min_cluster_energy_mev = (
@@ -1606,7 +1619,7 @@ def main() -> int:
             if not v2_variants:
                 m1 = staged_run(ns1, v2mod, v2cfg, _run_phase2, snapshot_backbone_hits_v11,
                                 verify_backbone_hits_unchanged_v11, truth_t0, e_pos, "rescued",
-                                police=police_fn)
+                                police=police_fn, skip_v2=bool(args.skip_v2))
                 acc1, af1 = m1["v2_acc"], m1["v2_afrac"]
                 if args.cheat != "none":
                     _repin_ns(ns1)
