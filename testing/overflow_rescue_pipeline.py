@@ -368,6 +368,10 @@ def main() -> int:
     ap.add_argument("--evo", action="store_true",
                     help="record per-cluster median t at every stage checkpoint "
                          "(row['t_evo'] + dump key 't_evo'); read-only snapshots")
+    ap.add_argument("--light-ckpt", default="",
+                    help="override the amplitude-perceiver checkpoint (e.g. "
+                         "the 4x-smaller ndfull_small4x model; arch read "
+                         "from the checkpoint's 'arch' dict)")
     ap.add_argument("--decline-r", type=float, default=0.0,
                     help="v0.8.4: after force, audit small imaged clusters; "
                          "if best-case light delta-loss / template-norm > r, "
@@ -556,6 +560,11 @@ def main() -> int:
     if os.environ.get("CLM_IMAGE_BATCH"):        # shrink render footprint for a memory-constrained GPU
         cfg.prediction.image_batch_size = int(os.environ["CLM_IMAGE_BATCH"])
         print(f"[mem] image_batch_size={cfg.prediction.image_batch_size}", flush=True)
+    if args.light_ckpt:
+        # v0.6.2 / v0.8.5: alternate (e.g. 4x-smaller) amplitude perceiver;
+        # the loader reads the checkpoint's "arch" dict when present
+        cfg.model.light_checkpoint = args.light_ckpt
+        print(f"light checkpoint override -> {args.light_ckpt}", flush=True)
     cfg.prediction.min_cluster_energy_mev = 50.0
     if args.phase3 != "none":
         cfg.prediction.min_cluster_energy_mev = (
