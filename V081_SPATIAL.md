@@ -102,6 +102,25 @@ block (z_min, z_own, dz, chi2_loc).  Artifacts:
 (deploy HGB + calibrated global thresholds 0.25/0.5/1/2 %),
 `testing/v083_prune_rows.npz`.
 
+## Variance-prediction weighting (2026-08-13): tested with the REAL model — not adopted
+
+The variance perceiver (ConformerVarPredictor) had silently never loaded in
+this chain: optional asset, checkpoints absent from the harness's release
+clone (`CLMatching_v0.1_backboneOnly/CLMatching_AlphaRelease`), silent
+fallback to std=1.  Restored via symlinks (loads and predicts now;
+`full_light_std_phase2` is σ², `return_variance=True`, floor 1).
+
+Paired A/B (17,775 clusters, quadrature `var = GAIN·max(A,100) + σ²_pred`):
+decision band (E<2) tie (purity 49→49 %, NS 97.50 vs 97.51); ABOVE the band
+the light-regret discrimination DEGRADES (dz 0.621→0.575 at 5–20 MeV,
+0.706→0.577 at 20–100).  Root cause measured by pulls: Poisson-only
+weighting is already over-covered (pull std 0.76, robust 0.47 vs 1.0) — the
+amplitude term alone overestimates the scatter, so ANY additive variance
+moves coverage further from unity.  Reverted; the A/B harness
+(`testing/v083_std_ab.py`) and the restored model remain.  A useful
+variance model would need to REPLACE the error model (target pull ≈ 1),
+not add to it — a Charge2Light/variance-retrain design question.
+
 ## v0.8.2 exploration (2026-08-07): the loop is at a FIXED POINT — no adoption
 
 Three smarter-loop designs, all measured on file 0000001 vs v0.8.1

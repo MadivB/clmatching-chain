@@ -30,7 +30,9 @@ def _proc(fp):
                             "ts_final", "truth_t0")}
     actual = d["full_light"].astype(np.float64)
     base = d["base_image"].astype(np.float64)
-    std = d["full_light_std"].astype(np.float64) if "full_light_std" in d.files else None
+    # dumped field is VARIANCE (sigma^2, return_variance=True) -> take sqrt
+    std = (np.sqrt(d["full_light_std"].astype(np.float64))
+           if "full_light_std" in d.files else None)
     args = (ev["labels"], ev["tpc"], ev["y"].astype(np.float64),
             np.clip(ev["e"].astype(np.float64), 0, None),
             ev["ts_final"].astype(np.float64), actual, base)
