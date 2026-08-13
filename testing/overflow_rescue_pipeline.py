@@ -72,10 +72,10 @@ STAGE_CHECKPOINTS = [
     ("after_staged", "3.3+3.5_p2_v2_police"),
     ("after_expand", "3.9_expansion"),
     ("after_joint", "3.9_joint"),
-    ("after_pass2", "3.95_pass2_trade"),
-    ("after_pass3f", "3.97_pass3_family"),
     ("after_matrix", "4.1_matrix"),
     ("after_matrix_relax", "4.2_matrix_relax"),
+    ("after_pass2", "3.95_pass2_trade"),
+    ("after_pass3f", "3.97_pass3_family"),
     ("after_swap_fix", "4.5_swap_fix"),
     ("after_force", "4.9_force_coverage"),
 ]
