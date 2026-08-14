@@ -54,6 +54,20 @@ S_BAND = 0.60
 COS_CUT = 0.75
 Z_CUT = 2.0
 EXCESS_GATE = 500.0
+N_CH_GATE = 3
+
+
+def configure_gate(excess=None, zcut=None, nch=None, cos=None):
+    """Re-tune the overflow/defer trigger thresholds (support-gate era)."""
+    global EXCESS_GATE, Z_CUT, N_CH_GATE, COS_CUT
+    if excess is not None:
+        EXCESS_GATE = float(excess)
+    if zcut is not None:
+        Z_CUT = float(zcut)
+    if nch is not None:
+        N_CH_GATE = int(nch)
+    if cos is not None:
+        COS_CUT = float(cos)
 
 
 def make_cos_pick(mode, cos_min=0.6, lam=1.0):
@@ -104,7 +118,7 @@ def trigger_fired(lab, t0, baseA, info, image_maps, actual, veto_mask, ti,
         ex = p - a
         z = ex / np.sqrt(GAIN * np.maximum(a, 100.0))
         zz = np.sort(z[fin & (ex >= EXCESS_GATE)])[::-1]
-        if zz.size >= 3 and zz[2] > Z_CUT:
+        if zz.size >= N_CH_GATE and zz[N_CH_GATE - 1] > Z_CUT:
             return True
         o = ti(np.asarray(image_maps[(int(lab), int(c))], np.float64), t0)[:, tick]
         res = np.clip(np.clip(a, 0, None) - np.clip(p - o, 0, None), 0, None)

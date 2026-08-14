@@ -1,0 +1,155 @@
+# Charge-Light Matching — Version History
+
+*The evolution of the pre-reconstruction charge-light matching chain.
+Success = |reco − truth| ≤ 10 ticks (±160 ns), energy-weighted.
+Headline metrics: **NS** = non-shower TPCs (≤1.4 GeV truth) at forced 100 %
+coverage; **all-TPC** = every TPC. 126-event reference sample = files
+0000001–0000010. Adopted versions are tagged on `MadivB/clmatching-chain`.*
+
+## The ledger (adopted versions, 126 events unless noted)
+
+| version | date | NS | all-TPC | one-line summary |
+|---|---|---|---|---|
+| v0.2 | 2026-07 | 97.25* | — | permutation placement + police (39-ev, pre-fix numbers) |
+| v0.4.0 | 07-10 | 95.7 | — | 4-stage architecture defined, per-stage instrumentation |
+| v0.4.1 | 07-15 | 95.78 | — | merged permutation pool (3.1+3.3) |
+| v0.6 | 07-2x | 96.05 | 95.06 | external frontend clustering (96 % target met) |
+| v0.7 | 08-0x | 96.19 | 95.07 | joint mean-field simultaneous assignment |
+| v0.8 | 08-06 | 96.49 | 95.49 | PASS 2 spatial trading |
+| v0.8.1 | 08-07 | 96.53 | 95.55 | light-nominated trade candidates |
+| v0.8.3 | 08-11 | (output mode) | | confidence hit-pruning, neutron-safe |
+| v0.8.5 | 08-13 | 96.46† | 95.65† | 4×-smaller amplitude perceiver (−33 % stage 1) |
+| v0.8.6 | 08-14 | 96.47 | 95.60 | + skip V2 → **115 s/ev single-node latency** |
+| v0.8.7 (cand.) | 08-14 | — | — | support-restricted overflow gate (cert running) |
+
+\* 39-event sample, pre length-gate fix — not comparable to later numbers.
+† file-0000001 same-node pair; 126-ev v0.8.6 row is the certified one.
+
+---
+
+## v0.1 – v0.3: foundations
+
+- **v0.1 backbone-only** — fresh-clone baseline; stack2 backbone, quick-test
+  mode. The working tree all later versions grew inside.
+- **v0.2** (frozen `CLMatching_v0.2`) — energy-banded permutation placement
+  (s=0.60), the overflow **defer gate** ("locked" trigger: cos<0.75 OR ≥3
+  channels excess≥500 & z>2), placement police, swap + rescue passes.
+  Post-V2 97.25 on the old 39-event sample.
+- **v0.3.0** — bad-TPC event-display study: **91 % of residual wrong energy
+  was pairwise family t0 SWAPS** (this diagnosis drove v0.7/v0.8 design);
+  family expansion for the <50 MeV tail; error-matrix tail stage.
+
+## v0.4: architecture
+
+- **v0.4.0** (07-10) — the 4-stage numbering the chain still uses:
+  1 clustering+ML → 2 Phase-1 (showers, ≥3-TPC) → 3.x Phase-2 (3.1 backbone
+  pool, 3.2 trigger+rescue, 3.3 P2 scan, 3.5 V2, 3.9 expansion) → 4.x
+  Phase-3 (4.1 matrix, 4.5 swap-fix, 4.9 force). Per-stage timings in
+  `row["stage_t"]`. Shower-TPC dedicated path tested and SHELVED.
+- **v0.4.1** (07-15, frozen) — **merged pool** (`--merge-p2`): every P2-class
+  cluster (>30 MeV or multi-TPC) goes through the same all-orderings
+  permutation pool as the backbone; corrections after all placements.
+  NS 95.78.
+- **Cheating study** (07-15) — backbone is SOLVED (perfect type-1 worth only
+  +0.5pp); the potential lives in type-2 merged clusters (~1.7pp) and
+  type-3 small clusters (~2.6pp). Guided everything after.
+
+## v0.5: the loss experiment and the release
+
+- **v0.5.0** (07-16) — user's signed/cubic loss idea. TESTED AND REJECTED:
+  both arms lose ~1.5pp (|ΣL| balance is degenerate to cross-channel
+  cancellation). Lesson: never collapse the per-channel comparison.
+- **v0.5.6** (travel release) — 10 flow-file `.pt` outputs + per-cluster
+  confidence + offline clustering-tuning package (`CLMatching_v0.5.6_release`).
+
+## v0.6: the external frontend  *(96 % target met)*
+
+- User's `clmatching-frontend` repo wired in via `frontend_adapter.py`
+  (`--frontend-repo`). Full stats: **NS 96.05 / all-TPC 95.06** — +0.44pp
+  over builtin, every file better. Frozen (`CLMatching_v0.6`), pushed to
+  GitHub with the chain (`clmatching-chain` + submodule). TDR plot set
+  regenerated ("Interaction" naming, ±10-tick standard).
+- **v0.6.2** (08-13) — v0.6 flags + the 4×-smaller perceiver: 95.97/95.17
+  (noise-level vs big), stage 1 −40 %.
+
+## v0.7: joint assignment  *(user's [t, p|S, p|L] idea)*
+
+- The light χ² is EXACTLY pairwise-quadratic in assignment one-hots →
+  sparse MRF/QUBO, annealed mean-field solver (`v070_joint.py`). Unaries
+  from one FFT scan per cluster; geodesic-connectivity prior **in energy
+  units** (temperature-free priors get annealed away — measured lesson);
+  hybrid split: solver owns TPCs ≤1.4 GeV. **NS 96.19 / 95.07.**
+  (all-TPC guard added after an iter-2 regression caught ONLY by the
+  user's insistence on reporting both metrics.)
+
+## v0.8 family: the light↔spatial loop  *(user's Q1/Q2 philosophy)*
+
+- **v0.8** (08-06) — **PASS 2 spatial trading** (`--pass2-trade`): truth-
+  validated spatial score v4 (typed member PCA, vertex, cone, best-member
+  pooling; HGB), KD prefilter, light-curve veto, margin-ordered non-1:1
+  trades. **96.49 / 95.49** (125/1 events). Q1-SWAP built and measured
+  DEAD: 0 true swap pairs in 126 events — the v0.3 swap failure mode was
+  eaten by merged pool + joint solver.
+- **v0.8.1** (08-07) — spatial-score campaign (user's SPATIAL_SCORE.md
+  reimplemented + extended; truth AUC 0.930 but operational transfer
+  fails — all scorers ~0.72, v4 stays). Census: candidate generation was
+  the binding constraint (57 % reachable / 92 % exists / 8 % no-slot) →
+  **light-nominated candidates**: families at the cluster's own curve
+  minima join the candidate set. **96.53 / 95.55** (114/10 events;
+  via-light trades FIXED 740 / BROKE 164). `tpc_adjacency.json` built
+  (7×5 module grid ×2 drift; gaps 5–6.5 cm).
+- **v0.8.2** (08-07) — loop-deepening: iteration ×3, full Q1↔Q2
+  alternation, symmetric light-proposal. ALL NULL — the loop is at a
+  fixed point after one pass. Headroom is outside the loop.
+- **v0.8.3** (08-11/12) — **confidence hit-pruning output mode**
+  (`--prune-frac`). Charge+light badness; user requirement simplified it
+  to 4-5 thresholds; user physics constraint (neutron deposits 0.5–6 MeV
+  must stay assigned) set the discard gate: final rule **E<2 MeV AND all
+  of [d_eu>20 cm, dz>0.25, z_own>−2]** — 0.34 % of hits, assigned-acc
+  +0.30, purity 50 %, nothing ≥2 MeV ever unassigned. "Tiny" defined by
+  measurement: light-blind <3 MeV, weak 3–20, trustworthy ≥20 MeV
+  (matches k*(E)=0 at 20.2 MeV).
+- **v0.8.4** (08-12) — decline-or-repair side path. NULL with a lesson:
+  "fits nowhere" selects broken TEMPLATES, not misplacements (85–93 % of
+  declined clusters were correctly placed) — misplaced clusters by
+  definition fit well somewhere (that low-r signal IS PASS-2 nomination).
+- **Variance weighting** (08-13) — restored the never-loading variance
+  perceiver, tested quadrature weighting: tie in-band, degrades above;
+  pulls show Poisson-only already over-covers (0.76 vs 1.0) — any additive
+  variance worsens coverage. Reverted; model dropped for speed. A useful σ
+  model must REPLACE the error model targeting pull≈1 (retrain item).
+- **v0.8.5** (08-13) — **4×-smaller amplitude perceiver** (HybridPerceiver3D
+  10.24M, b32/e256; Val R² 0.9850 vs prod 0.9854). Arch-aware loader,
+  `--light-ckpt`. Accuracy noise-level; stage 1 −33 %.
+- **v0.8.6** (08-14) — **the speed release**: + `--skip-v2` (V2 rescue fully
+  superseded by joint+PASS 2 — 126-ev NS delta −0.06 at a PERFECT 63/63
+  split). **147 s/ev wall, 18.4 s/ev node-throughput, 115 s/ev
+  single-worker latency — the ≤120 s/event single-node requirement MET.**
+  Rejected on the way: `--fast-track-stage` (5 s for −0.32pp — track-stage
+  refinements feed t0/flash quality downstream).
+- **v0.8.7 (candidate, 08-14)** — **support-restricted overflow gate**
+  (`--gate-support`). Superposition test on the family that deferred
+  cluster 446: sum-of-separate renders +4.3 % total and **+92/+115 % on
+  non-support channels** (pure summation floor; collective render cures
+  them), and 2 of the 3 gate-tripping channels were exactly that garbage.
+  Fix: both trigger branches restricted to the subject's support channels.
+  File 1: deferrals −41 %, rescue flags −38 %, accuracy neutral (false
+  defers were benign via defer-then-place). 10-file certification +
+  threshold re-tune (excess/z/nch/cos now flags) in progress.
+
+## Standing constraints and lessons (do not relearn)
+
+1. Both metrics (NS AND all-TPC) headline every result table.
+2. Neutron deposits ≥2 MeV are never unassigned (physics requirement).
+3. Light-driven decisions respect the information boundaries: blind <3 MeV,
+   weak prior 3–20 MeV, trustworthy ≥20 MeV.
+4. Per-channel light comparison, never a collapsed scalar (v0.5.0).
+5. Priors in energy units, annealing-consistent (v0.7).
+6. Truth-side score gains don't transfer operationally — validate on reco
+   populations (v0.8.1).
+7. Data-facing algorithms: few thresholds, 1D-checkable (v0.8.3).
+8. Old stages don't announce obsolescence — measure supersession
+   (production placement, V2, swap machinery).
+9. The per-cluster-render SUM is not additive: +3 % median / ×1.65 p90 on
+   bright channels, ×2 on far dim channels. Gates must read support
+   channels; superposition-consistency is a Charge2Light training item.

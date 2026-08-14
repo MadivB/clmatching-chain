@@ -369,6 +369,14 @@ def main() -> int:
     ap.add_argument("--evo", action="store_true",
                     help="record per-cluster median t at every stage checkpoint "
                          "(row['t_evo'] + dump key 't_evo'); read-only snapshots")
+    ap.add_argument("--gate-excess", type=float, default=500.0,
+                    help="overflow gate: min per-channel excess ADC")
+    ap.add_argument("--gate-zcut", type=float, default=2.0,
+                    help="overflow gate: min poisson z of counted excess")
+    ap.add_argument("--gate-nch", type=int, default=3,
+                    help="overflow gate: channels over threshold to fire")
+    ap.add_argument("--gate-cos", type=float, default=0.75,
+                    help="overflow gate: cos(own,resid) firing threshold")
     ap.add_argument("--gate-support", action="store_true",
                     help="v0.8.7: restrict the overflow/defer+rescue trigger "
                          "to the subject's support channels (kills the "
@@ -568,6 +576,12 @@ def main() -> int:
         _batchmod.V11_LARGE_CLUSTER_ENERGY_MEV = float(args.p2_threshold)
         print(f"P2/P3 boundary -> {args.p2_threshold} MeV", flush=True)
 
+    from v02_refine_pipeline import configure_gate as _cfg_gate
+    _cfg_gate(excess=args.gate_excess, zcut=args.gate_zcut,
+              nch=args.gate_nch, cos=args.gate_cos)
+    if (args.gate_excess, args.gate_zcut, args.gate_nch, args.gate_cos) != (500.0, 2.0, 3, 0.75):
+        print(f"gate thresholds -> excess {args.gate_excess} z {args.gate_zcut} "
+              f"nch {args.gate_nch} cos {args.gate_cos}", flush=True)
     cfg = build_default_first_stage_config()
     if os.environ.get("CLM_IMAGE_BATCH"):        # shrink render footprint for a memory-constrained GPU
         cfg.prediction.image_batch_size = int(os.environ["CLM_IMAGE_BATCH"])
