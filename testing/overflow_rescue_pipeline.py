@@ -576,6 +576,8 @@ def main() -> int:
         _batchmod.V11_LARGE_CLUSTER_ENERGY_MEV = float(args.p2_threshold)
         print(f"P2/P3 boundary -> {args.p2_threshold} MeV", flush=True)
 
+    if _HERE not in sys.path:
+        sys.path.insert(0, _HERE)
     from v02_refine_pipeline import configure_gate as _cfg_gate
     _cfg_gate(excess=args.gate_excess, zcut=args.gate_zcut,
               nch=args.gate_nch, cos=args.gate_cos)
