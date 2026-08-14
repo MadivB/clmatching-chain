@@ -17,6 +17,10 @@ FP = f"{DATA}/MiniProdN5p1_NDComplex_FHC.flow.full.sanddrift.{FTAG}.FLOW.hdf5"
 import os as _os
 if _os.environ.get("WT_FRONTEND_REPO"):
     W.FRONTEND_REPO = _os.environ["WT_FRONTEND_REPO"]
+if _os.environ.get("WT_LIGHT_CKPT"):
+    W.LIGHT_CKPT = _os.environ["WT_LIGHT_CKPT"]
+if _os.environ.get("WT_SKIP_V2"):
+    W.SKIP_V2 = _os.environ["WT_SKIP_V2"] not in ("0", "false", "False")
 _sub = _os.environ.get("WT_SUBJECT", "").strip()
 if _sub:
     _parts = _sub.split(",")

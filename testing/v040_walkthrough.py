@@ -1,4 +1,4 @@
-"""Step-by-step v0.8.1 walkthrough engine for the notebook
+"""Step-by-step v0.8.6 walkthrough engine for the notebook
 (v040_step_by_step.ipynb).
 
 Runs the FULL v0.8.1 chain on one event (whole ND, algorithm unchanged) while
@@ -7,10 +7,11 @@ image) is updated.  The callback receives (stage, note, base_view) — the
 notebook draws the usual 2D light+charge display and an inline 3D
 reconstructed view at each checkpoint.
 
-Stage map (canonical v0.8.1 flags: stack2 backbone + MERGED 3.1/3.3 pool
+Stage map (canonical v0.8.6 flags: stack2 backbone + MERGED 3.1/3.3 pool
 (--merge-p2), poisson trigger, veto-4, police locked, merge-vertex, external
-frontend, phase3 JOINT + PASS 2 light-nominated trading + force, swap 0.85,
-boundary 30, predict >= 1.5):
+frontend, 4x-smaller amplitude perceiver (LIGHT_CKPT), NO V2 (SKIP_V2 — 
+superseded by joint+PASS2), phase3 JOINT + PASS 2 light-nominated trading
++ force, swap 0.85, boundary 30, predict >= 1.5):
   1        clustering & ML prediction (inside the first-stage call)
   2        Phase 1: showers + >=3-TPC tracks (per-placement checkpoints)
   3.1      MERGED permutation pool: 1-2-TPC backbone tracks + every P2-class
@@ -18,7 +19,7 @@ boundary 30, predict >= 1.5):
            batches with the defer gate (per-commit checkpoints)
   3.2      trigger + saving on the full model (per-ADOPT checkpoints)
   3.3      Phase-2 scan for what 3.2 detached + police
-  3.5      V2 spatial+light rescue + police
+  3.5      V2 rescue: SKIPPED in v0.8.6 (SKIP_V2=False to replay)
   3.9      JOINT mean-field assignment, TPCs <= 1.4 GeV (per-winner replay)
   4.1      error matrix for the leftovers (stage checkpoint)
   3.95     PASS 2 spatial trading + light-nominated candidates (per-trade)
@@ -59,6 +60,13 @@ def _ensure_here():
 FRONTEND_REPO = None
 FRONTEND_PARAMS = None
 FRONTEND_SHOWER_MIN_TRACKS = 0
+# v0.8.6: alternate amplitude-perceiver checkpoint (the 4x-smaller
+# ndfull_small4x by default in the notebook); None = production 40.8M model.
+LIGHT_CKPT = None
+# v0.8.6: the V2 rescue stage is skipped in the canonical chain (fully
+# superseded by joint + PASS 2, measured on 126 events). Set False to
+# replay the old chain.
+SKIP_V2 = True
 
 PEAK = 105
 GAIN = 200.0
@@ -103,6 +111,9 @@ def load_chain():
     cfg.prediction.min_cluster_energy_mev = PREDICT_MIN
     cfg.support.saturation_max_clip_ticks = 4
     cfg.clustering.vertex_merge_enable = True
+    if LIGHT_CKPT:
+        cfg.model.light_checkpoint = LIGHT_CKPT
+        print(f"[load_chain] amplitude perceiver -> {LIGHT_CKPT}")
     v2cfg = build_default_v2_config(n_outer_passes=1, light_max_total_moves=24,
                                     light_max_moves_per_tpc=3, device_policy="auto",
                                     verbose=False)
@@ -699,21 +710,25 @@ def staged_stage(S, cb: Callable):
     cb("3.3 police", f"police checked {stp2['n_checked']}, fired {stp2['n_fired']}; "
        f"fixes touching this TPC: {fixes}", force=bool(fixes))
 
-    ts2b = np.asarray(ns["hit_timestamps"], np.float64).copy()
-    t0 = time.perf_counter()
-    ctx["v2mod"].run_trial2_v2_light_rescue_from_namespace(ns, config=ctx["v2cfg"], commit=True)
-    _tick(S, "3.5 V2 spatial+light rescue", t0)
-    ts3 = np.asarray(ns["hit_timestamps"], np.float64)
-    moved_here = _moved_in_watch(S, ts2b, ts3)
-    cb("3.5 V2", f"V2 moved/assigned in watched TPC: {moved_here}", force=True)
+    if SKIP_V2:
+        cb("3.5 V2", "SKIPPED (v0.8.6 canonical: V2 fully superseded by "
+           "joint + PASS 2 — measured on 126 events)", force=True)
+    else:
+        ts2b = np.asarray(ns["hit_timestamps"], np.float64).copy()
+        t0 = time.perf_counter()
+        ctx["v2mod"].run_trial2_v2_light_rescue_from_namespace(ns, config=ctx["v2cfg"], commit=True)
+        _tick(S, "3.5 V2 spatial+light rescue", t0)
+        ts3 = np.asarray(ns["hit_timestamps"], np.float64)
+        moved_here = _moved_in_watch(S, ts2b, ts3)
+        cb("3.5 V2", f"V2 moved/assigned in watched TPC: {moved_here}", force=True)
 
-    t0 = time.perf_counter()
-    stv2 = police(ns, ts2b, "v2")
-    _tick(S, "3.5b police (post-V2)", t0)
-    fixes = [f for f in stv2["fired_labels"]
-             if S["watch"] in S["cluster_to_tpcs"].get(f["label"], [])]
-    cb("3.5 police", f"police checked {stv2['n_checked']}, fired {stv2['n_fired']}; "
-       f"fixes touching this TPC: {fixes}", force=bool(fixes))
+        t0 = time.perf_counter()
+        stv2 = police(ns, ts2b, "v2")
+        _tick(S, "3.5b police (post-V2)", t0)
+        fixes = [f for f in stv2["fired_labels"]
+                 if S["watch"] in S["cluster_to_tpcs"].get(f["label"], [])]
+        cb("3.5 police", f"police checked {stv2['n_checked']}, fired {stv2['n_fired']}; "
+           f"fixes touching this TPC: {fixes}", force=bool(fixes))
 
 
 def _new_in_watch(S, ts_a, ts_b):
