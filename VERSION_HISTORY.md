@@ -20,7 +20,7 @@ coverage; **all-TPC** = every TPC. 126-event reference sample = files
 | v0.8.3 | 08-11 | (output mode) | | confidence hit-pruning, neutron-safe |
 | v0.8.5 | 08-13 | 96.46† | 95.65† | 4×-smaller amplitude perceiver (−33 % stage 1) |
 | v0.8.6 | 08-14 | 96.47 | 95.60 | + skip V2 → **115 s/ev single-node latency** |
-| v0.8.7 (cand.) | 08-14 | — | — | support-restricted overflow gate (cert running) |
+| v0.8.7 | 08-14 | 96.46 | 95.61 | support-restricted overflow gate (semantics fix) |
 
 \* 39-event sample, pre length-gate fix — not comparable to later numbers.
 † file-0000001 same-node pair; 126-ev v0.8.6 row is the certified one.
@@ -133,9 +133,12 @@ coverage; **all-TPC** = every TPC. 126-event reference sample = files
   non-support channels** (pure summation floor; collective render cures
   them), and 2 of the 3 gate-tripping channels were exactly that garbage.
   Fix: both trigger branches restricted to the subject's support channels.
-  File 1: deferrals −41 %, rescue flags −38 %, accuracy neutral (false
-  defers were benign via defer-then-place). 10-file certification +
-  threshold re-tune (excess/z/nch/cos now flags) in progress.
+  126-ev certification: NS 96.46 / all-TPC 95.61 (deltas −0.004/+0.003,
+  splits 43/61 and 52/61 — noise), deferrals 5778→3353 (−42 %), rescue
+  flags −40 %. Threshold scan (excess 300–1000, z 1.5–3, nch 2–4, cos
+  0.6–0.85): a PLATEAU — ±0.03pp across the whole grid despite 6× defer
+  variation; historical defaults kept. ADOPTED, tagged v0.8.7. The gate is
+  not a fragile knob; its thresholds need no future retuning campaigns.
 
 ## Standing constraints and lessons (do not relearn)
 
