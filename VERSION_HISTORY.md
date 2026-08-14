@@ -21,6 +21,7 @@ coverage; **all-TPC** = every TPC. 126-event reference sample = files
 | v0.8.5 | 08-13 | 96.46† | 95.65† | 4×-smaller amplitude perceiver (−33 % stage 1) |
 | v0.8.6 | 08-14 | 96.47 | 95.60 | + skip V2 → **115 s/ev single-node latency** |
 | v0.8.7 | 08-14 | 96.46 | 95.61 | support-restricted overflow gate (semantics fix) |
+| v0.8.8 | 08-14 | 96.49 | 95.64 | stage 5: LE blip re-timing (LE class 58.7→60.9) |
 
 \* 39-event sample, pre length-gate fix — not comparable to later numbers.
 † file-0000001 same-node pair; 126-ev v0.8.6 row is the certified one.
@@ -139,6 +140,25 @@ coverage; **all-TPC** = every TPC. 126-event reference sample = files
   0.6–0.85): a PLATEAU — ±0.03pp across the whole grid despite 6× defer
   variation; historical defaults kept. ADOPTED, tagged v0.8.7. The gate is
   not a fragile knob; its thresholds need no future retuning campaigns.
+
+## v0.8.8 (08-14): stage 5 — LE blip re-timing  *(the neutron-ToF campaign)*
+
+User thesis: the LE territory (noise hits + sub-1.5 MeV clusters, ~2 % of
+truth energy; SPINE-unreachable) is uncontested CLM value; the borrowed
+class sat at 56 %.  Anatomy census: correct family EXISTS for 93 % of wrong
+blips but is the nearest one only 2 % (displaced deposits — the neutron
+signature); rank-3 contains truth 57 %; ambiguity census: 96.4 % of LE
+energy has time-DISAGREEING candidates (geometry near its information
+ceiling).  Three ranker iterations failed instructively (candidate sets
+missing the incumbent; forced no-incumbent changes; linear model flat);
+HGB on feature interactions extracted the available signal.  Stage 5
+(`--le-retime`): 3-cm LE blobs, k=8 member-distance candidates + incumbent,
+batched HGB, incumbent-margin gating, 4.8 s/ev, on the placed backbone
+only.  **126-ev certification: LE 58.7→60.9 (+2.2), NS 96.46→96.49
+(123/3), all-TPC 95.61→95.64 (124/2).**  Lesson (user): spatial isolation
+is the PHYSICS signature of displaced deposits, not wrongness — retired as
+a give-up signal in the LE band; the per-blip association margin is the
+confidence product for neutron ToF selection.
 
 ## Standing constraints and lessons (do not relearn)
 
