@@ -369,6 +369,10 @@ def main() -> int:
     ap.add_argument("--evo", action="store_true",
                     help="record per-cluster median t at every stage checkpoint "
                          "(row['t_evo'] + dump key 't_evo'); read-only snapshots")
+    ap.add_argument("--gate-support", action="store_true",
+                    help="v0.8.7: restrict the overflow/defer+rescue trigger "
+                         "to the subject's support channels (kills the "
+                         "summation-floor false defers at big families)")
     ap.add_argument("--skip-v2", action="store_true",
                     help="speed: skip the V2 rescue stage (~38-50 s/ev) — "
                          "candidate superseded by joint+PASS2")
@@ -882,13 +886,30 @@ def main() -> int:
                     hit_t0[labels_global == lab] = np.float32(info_b[lab]["t0"])
                 if args.backbone == "stack2":
                     stx = {}
-                    hook = make_defer_hook(info_b, image_maps, actual, veto_mask, ti_f, stx)
+                    # v0.8.7 candidate: restrict the overflow/defer gate to the
+                    # subject's SUPPORT channels — the per-cluster-render sum
+                    # smears +90-115% floors onto far channels at big families
+                    # and the all-channel gate defers correct placements there
+                    gate_sup = None
+                    if args.gate_support:
+                        def gate_sup(lab, c, _sc=support_cache, _im=image_maps,
+                                     _li=label_info):
+                            lt = str(_li.get(int(lab), {}).get("type", "track")).lower()
+                            entry = _sc.get((int(lab), int(c))) if lt == "track" else None
+                            if entry is not None:
+                                return np.asarray(entry["channel_indices"], dtype=int)
+                            img = _im.get((int(lab), int(c)))
+                            if img is None:
+                                return None
+                            return np.flatnonzero(np.asarray(img).max(axis=1) > 1.0)
+                    hook = make_defer_hook(info_b, image_maps, actual, veto_mask, ti_f, stx,
+                                           sup_fn=gate_sup)
                     tmap, pool_st = place_pool_v02(pool_b, 0.60, b_full, info_b, image_maps,
                                                    actual, w_full, ti_f,
                                                    pick=make_cos_pick("soft"), commit_hook=hook)
                     n_swp = swap_pass(tmap, b_full, info_b, image_maps, actual, w_full, ti_f)
                     nfp, nrp = rescue_pass(tmap, b_full, info_b, image_maps, actual, w_full,
-                                           veto_mask, ti_f)
+                                           veto_mask, ti_f, sup_fn=gate_sup)
                 else:
                     tmap, pool_st = place_pool_v02(pool_b, 0.60, b_full, info_b, image_maps,
                                                    actual, w_full, ti_f)

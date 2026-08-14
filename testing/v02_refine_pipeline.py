@@ -77,8 +77,15 @@ def make_cos_pick(mode, cos_min=0.6, lam=1.0):
     return pick
 
 
-def trigger_fired(lab, t0, baseA, info, image_maps, actual, veto_mask, ti):
-    """The locked v0.1 trigger: cos(own,resid)<0.75 OR >=3 gated channels z_pois>2."""
+def trigger_fired(lab, t0, baseA, info, image_maps, actual, veto_mask, ti,
+                  sup_fn=None):
+    """The locked v0.1 trigger: cos(own,resid)<0.75 OR >=3 gated channels z_pois>2.
+
+    sup_fn (optional): (lab, tpc) -> support channel indices.  When given,
+    BOTH branches are restricted to the subject's support channels — the
+    per-cluster-render summation smears a floor onto far channels (measured
+    +90-115% on non-support channels at big families), and counting excess
+    there defers correctly-placed clusters."""
     n_ticks = actual.shape[2]
     tick = int(round(t0)) + PEAK
     if not (0 <= tick < n_ticks):
@@ -86,6 +93,12 @@ def trigger_fired(lab, t0, baseA, info, image_maps, actual, veto_mask, ti):
     cmin = 1.0
     for c in info[lab]["tpcs"]:
         fin = ~veto_mask[c]
+        if sup_fn is not None:
+            ch_sup = sup_fn(int(lab), int(c))
+            if ch_sup is not None and len(ch_sup):
+                msup = np.zeros(fin.shape[0], dtype=bool)
+                msup[np.asarray(ch_sup, dtype=int)] = True
+                fin = fin & msup
         a = actual[c][:, tick]
         p = np.minimum(baseA[c][:, tick], CLIP)
         ex = p - a
@@ -101,13 +114,14 @@ def trigger_fired(lab, t0, baseA, info, image_maps, actual, veto_mask, ti):
     return cmin < COS_CUT
 
 
-def make_defer_hook(info, image_maps, actual, veto_mask, ti, stats):
+def make_defer_hook(info, image_maps, actual, veto_mask, ti, stats, sup_fn=None):
     deferred = set()
 
     def hook(lab, t0, baseA):
         if lab in deferred:
             return True
-        if trigger_fired(lab, t0, baseA, info, image_maps, actual, veto_mask, ti):
+        if trigger_fired(lab, t0, baseA, info, image_maps, actual, veto_mask, ti,
+                         sup_fn=sup_fn):
             deferred.add(lab)
             stats["n_deferred"] = stats.get("n_deferred", 0) + 1
             return False
@@ -197,11 +211,13 @@ def relax_pass(tmap, baseA, info, image_maps, actual, w_full, ti, pick=None, max
     return n_moved
 
 
-def rescue_pass(tmap, baseA, info, image_maps, actual, w_full, veto_mask, ti):
+def rescue_pass(tmap, baseA, info, image_maps, actual, w_full, veto_mask, ti,
+                sup_fn=None):
     n_flag = n_moved = 0
     for lab in sorted(tmap, key=lambda l: -info[l]["energy"]):
         t_old = tmap[lab]
-        if not trigger_fired(lab, t_old, baseA, info, image_maps, actual, veto_mask, ti):
+        if not trigger_fired(lab, t_old, baseA, info, image_maps, actual, veto_mask, ti,
+                             sup_fn=sup_fn):
             continue
         n_flag += 1
         add_label(baseA, lab, t_old, info, image_maps, ti, sign=-1.0)
