@@ -369,6 +369,10 @@ def main() -> int:
     ap.add_argument("--evo", action="store_true",
                     help="record per-cluster median t at every stage checkpoint "
                          "(row['t_evo'] + dump key 't_evo'); read-only snapshots")
+    ap.add_argument("--le-retime", action="store_true",
+                    help="stage 5: re-time LE blobs (noise + sub-1.5 MeV "
+                         "clusters) by ranked candidate families on the "
+                         "placed backbone (le_ranker.json)")
     ap.add_argument("--gate-excess", type=float, default=500.0,
                     help="overflow gate: min per-channel excess ADC")
     ap.add_argument("--gate-zcut", type=float, default=2.0,
@@ -2071,6 +2075,15 @@ def main() -> int:
                     st_dc["time_s"] = round(time.time() - t_dc, 2)
                     p3_row["decline"] = st_dc
                     p3_row["decline_audit"] = aud_dc
+                if args.le_retime:
+                    if _HERE not in sys.path:
+                        sys.path.insert(0, _HERE)
+                    from le_retime import run_le_retime
+                    t_le = time.time()
+                    st_le = run_le_retime(
+                        ns1, truth_fn_hit=lambda blob: truth_t0[blob])
+                    st_le["time_s"] = round(time.time() - t_le, 2)
+                    p3_row["le_retime"] = st_le
                 if args.new_flash_rescue:
                     if _HERE not in sys.path:
                         sys.path.insert(0, _HERE)
@@ -2135,6 +2148,16 @@ def main() -> int:
                 e_pos[good_ns].sum() / max(e_pos[ok_ns & asg_ns].sum(), 1e-9))
             m1["ns_assigned_efrac"] = float(
                 e_pos[ok_ns & asg_ns].sum() / max(e_pos[ok_ns].sum(), 1e-9))
+            _ce_le = {}
+            for _l in np.unique(labels_global[labels_global >= 0]):
+                _ce_le[_l] = e_pos[labels_global == _l].sum()
+            _small_le = np.isin(labels_global,
+                                [l for l, en in _ce_le.items() if en < 1.5])
+            _le = ((labels_global < 0) | _small_le) & np.isfinite(truth_t0) \
+                & np.isfinite(ts_now) & (ts_now >= 0)
+            _le_good = _le & (np.abs(ts_now - truth_t0) <= CUT)
+            m1["le_acc"] = float(e_pos[_le_good].sum() / max(e_pos[_le].sum(), 1e-9))
+            m1["le_efrac"] = float(e_pos[_le].sum() / max(e_pos[np.isfinite(truth_t0)].sum(), 1e-9))
             m1["ns_efrac"] = float(e_pos[mask_ns].sum() / max(e_pos.sum(), 1e-9))
 
             ts_fin = np.asarray(ns1["hit_timestamps"], dtype=np.float64)
