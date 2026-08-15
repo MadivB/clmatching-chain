@@ -1,5 +1,39 @@
 # Eager shower absorption — design record (UNVERSIONED until proven; then v0.9.0)
 
+## MEASURED VERDICT (2026-08-15, file 0000001, 13 events) — NULL, not versioned
+
+| | v0.8.8 | +shower-eat | delta |
+|---|---|---|---|
+| NS acc | 96.50 | 96.49 | −0.00 |
+| all-TPC | 95.70 | 95.70 | −0.00 |
+| LE blips | 58.29 | 58.25 | −0.04 (noise; efrac unchanged) |
+| s/event | 138.0 | 143.3 | +5.4 (+3.9%) |
+
+Per-event: 0 up / 4 down / 9 tied. Eat ledger: **0 explicit seeds** (the
+external frontend types NO showers — n_showers = 0 all 13 events, the known
+open lever; Trigger 1 structurally dead on the canonical chain), **279
+emergent groups** recognized, but **median light-closure at recognition is
+already F = 0.86** — 276/279 groups pass the 60 % target before eating a
+single cluster. Only 17 clusters (0.16 GeV) eaten, want ratios 1.02–2.62,
+**100 % onto the correct t0** (truth audit, count- and energy-weighted) —
+yet 0 events improved: every eaten cluster would have been placed correctly
+by the normal Phase-2/3 machinery anyway, while the earlier b_full edits
+nudged 4 events down by ~0.02pp each. Guards: 3 contact-vetoes, 9 misfits,
+150 weak-want refusals (near-shower smalls are light-ambiguous — the <3 MeV
+light-blind band).
+
+**Interpretation:** by the time a shower is *recognizable* (post-pool
+co-location), the v0.8.1 pool + PASS-2 light nomination + expansion have
+already explained 86 % of its light — the eager-absorption niche is already
+occupied by the existing machinery. The mechanism is precise (100 % eat
+accuracy) but redundant. A truly mid-pool trigger could only help the
+remaining big-cluster scans, and the backbone is already ~98 % solved
+(cheat-study ceiling) — predicted null. Real preconditions for revisiting:
+(a) frontend shower typing (Trigger 1 unlock), (b) a chain state where
+shower light-closure at recognition is materially below 60 %.
+
+---
+
 *(User scheme, 2026-08-15. No version name until measured more efficient or
 more accurate than v0.8.8.)*
 

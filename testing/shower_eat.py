@@ -131,7 +131,7 @@ def run_shower_eat(*, seeds, b_full, hit_t0, image_maps, actual, w_full, ti,
                 img = np.asarray(image_maps[(int(l), c)])
                 ch = np.flatnonzero(img.max(axis=1) > 1.0)
                 sup.setdefault(c, set()).update(int(x) for x in ch)
-        return {c: np.array(sorted(s)) for c, s in sup.items()}
+        return {c: np.array(sorted(s), np.int64) for c, s in sup.items() if s}
 
     def fulfillment(sup, tick):
         num = den = 0.0
