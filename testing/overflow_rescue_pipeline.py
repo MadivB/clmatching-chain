@@ -369,6 +369,11 @@ def main() -> int:
     ap.add_argument("--evo", action="store_true",
                     help="record per-cluster median t at every stage checkpoint "
                          "(row['t_evo'] + dump key 't_evo'); read-only snapshots")
+    ap.add_argument("--shower-eat", action="store_true",
+                    help="UNVERSIONED candidate: eager shower absorption — "
+                         "placed showers (explicit or emergent) immediately "
+                         "eat surrounding clusters to 60%% light fulfillment "
+                         "(preference-margin ranked; contact/overflow guards)")
     ap.add_argument("--le-retime", action="store_true",
                     help="stage 5: re-time LE blobs (noise + sub-1.5 MeV "
                          "clusters) by ranked candidate families on the "
@@ -904,6 +909,24 @@ def main() -> int:
                 for lab in showers_b + multi_b + fixed_extra:
                     v02_add_label(b_full, lab, info_b[lab]["t0"], info_b, image_maps, ti_f)
                     hit_t0[labels_global == lab] = np.float32(info_b[lab]["t0"])
+                se_eatenA, se_stA = {}, {}
+                if args.shower_eat and showers_b:
+                    if _HERE not in sys.path:
+                        sys.path.insert(0, _HERE)
+                    from shower_eat import run_shower_eat
+                    _xyz_se = np.stack([np.asarray(fs.event.x, np.float64),
+                                        np.asarray(fs.event.y, np.float64),
+                                        np.asarray(fs.event.z, np.float64)], 1)
+                    _seedsA = [dict(t0=float(info_b[l]["t0"]), labels=[int(l)])
+                               for l in showers_b]
+                    se_eatenA, se_stA = run_shower_eat(
+                        seeds=_seedsA, b_full=b_full, hit_t0=hit_t0,
+                        image_maps=image_maps, actual=actual, w_full=w_full,
+                        ti=ti_f, labels_global=labels_global, e_pos=e_pos,
+                        xyz=_xyz_se, cluster_to_tpcs=cluster_to_tpcs,
+                        label_info=label_info, n_light=n_light,
+                        placed=set(info_b) | set(cheat_t0),
+                        truth_fn=_label_truth)
                 if args.backbone == "stack2":
                     stx = {}
                     # v0.8.7 candidate: restrict the overflow/defer gate to the
@@ -946,6 +969,37 @@ def main() -> int:
                         "n_placed": len(merged_placed),
                         "e_placed": float(sum(info_b[l]["energy"]
                                               for l in merged_placed))}
+                se_row = None
+                if args.shower_eat:
+                    if _HERE not in sys.path:
+                        sys.path.insert(0, _HERE)
+                    from shower_eat import run_shower_eat, emergent_groups
+                    _xyz_se = np.stack([np.asarray(fs.event.x, np.float64),
+                                        np.asarray(fs.event.y, np.float64),
+                                        np.asarray(fs.event.z, np.float64)], 1)
+                    _pm = {int(l): float(info_b[l]["t0"])
+                           for l in showers_b + multi_b}
+                    _pm.update({int(l): float(t) for l, t in tmap.items()})
+                    _seedsB = emergent_groups(_pm, info_b, label_info,
+                                              labels_global, _xyz_se, e_pos)
+                    se_eatenB, se_stB = run_shower_eat(
+                        seeds=_seedsB, b_full=b_full, hit_t0=hit_t0,
+                        image_maps=image_maps, actual=actual, w_full=w_full,
+                        ti=ti_f, labels_global=labels_global, e_pos=e_pos,
+                        xyz=_xyz_se, cluster_to_tpcs=cluster_to_tpcs,
+                        label_info=label_info, n_light=n_light,
+                        placed=set(info_b) | set(cheat_t0) | set(se_eatenA),
+                        truth_fn=_label_truth)
+                    for _l, (_t0e, _tp) in {**se_eatenA, **se_eatenB}.items():
+                        merged_placed[int(_l)] = (float(_t0e), list(_tp))
+                    _audA = se_stA.pop("audit", []) if se_stA else []
+                    _audB = se_stB.pop("audit", [])
+                    se_row = {"explicit": se_stA, "emergent": se_stB,
+                              "n_groups": len(_seedsB),
+                              "eaten_ok": sum(1 for a in _audA + _audB if a.get("ok")),
+                              "eaten_wrong": sum(1 for a in _audA + _audB
+                                                 if a.get("ok") is False),
+                              "audit": (_audA + _audB)[:150]}
                 _bh = {}
                 for _b in pool_st.get("batch_sizes", []):
                     _bh[str(int(_b))] = _bh.get(str(int(_b)), 0) + 1
@@ -2314,6 +2368,7 @@ def main() -> int:
                 "timing": tim, "stage_t": _stage_durations(tim),
                 "t_evo": (t_evo if args.evo else None),
                 "prune": row_prune,
+                "shower_eat": se_row if args.shower_eat else None,
                 "t_event_s": time.time() - t_ev,
                 "sigma_mode": args.sigma_mode, "z_cut": Z, "trig_rows": trig_rows,
                 "stay_margin": float(args.stay_margin), "cos_sel": float(args.cos_sel), "cos_window": float(args.cos_window), "group_diags": group_diags,
