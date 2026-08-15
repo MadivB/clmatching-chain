@@ -37,7 +37,12 @@ def run_le_retime(ns: dict[str, Any], *, model_path: str | None = None,
         if model_path.endswith(".joblib"):
             import joblib
             _b = joblib.load(model_path)
-            _MD[model_path] = {"hgb": _b["model"], "sub": _b.get("sub_idx")}
+            _sub = _b.get("sub_idx")
+            if _sub is None and _b.get("feats"):
+                from le_pre_spine import FEATS as _F
+                if list(_b["feats"]) != list(_F):
+                    _sub = [_F.index(f) for f in _b["feats"]]
+            _MD[model_path] = {"hgb": _b["model"], "sub": _sub}
         else:
             _MD[model_path] = json.load(open(model_path))
     md = _MD[model_path]
