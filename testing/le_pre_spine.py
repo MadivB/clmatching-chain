@@ -33,7 +33,7 @@ BLOB_LINK = 3.0
 CAND_R = 60.0          # candidate families within this centroid distance
 CAND_K = 8
 FEATS = ["d_min", "d_cent", "log_fe", "fam_n", "dt_ambig", "same_tpc",
-         "log_be", "d_min_rank", "is_inc"]
+         "log_be", "d_min_rank", "is_inc", "cos_fam", "cos_blob"]
 _HERE = os.path.dirname(os.path.abspath(__file__))
 MODEL_JSON = os.path.join(_HERE, "le_ranker.json")
 
@@ -100,10 +100,17 @@ def family_summaries(ev, le):
         if mem.size < 2:
             continue
         w = np.maximum(ev["e"][mem], 1e-6)
+        cent = np.average(ev["xyz"][mem], 0, weights=w)
+        d = (ev["xyz"][mem] - cent) * np.sqrt(w[:, None] / w.sum())
+        try:
+            _, _, vt = np.linalg.svd(d, full_matrices=False)
+            axis = vt[0]
+        except np.linalg.LinAlgError:
+            axis = None
         out.append(dict(
             t0=float(np.median(ts[mem])),
             tree=cKDTree(ev["xyz"][mem]),
-            cent=np.average(ev["xyz"][mem], 0, weights=w),
+            cent=cent, axis=axis,
             e=float(ev["e"][mem].sum()),
             n=int(mem.size),
             tpcs=set(int(t) for t in np.unique(ev["tpc"][mem]))))
@@ -117,6 +124,15 @@ def blob_rows(ev, fams, blob, t_cur=None):
     cent = bx.mean(0)
     be = float(ev["e"][blob].sum())
     btpc = int(np.bincount(ev["tpc"][blob].astype(int)).argmax())
+    # blob's own axis (elongated blobs point along the line to their source)
+    b_axis = None
+    if len(bx) >= 4:
+        try:
+            _, sv, vt = np.linalg.svd(bx - cent, full_matrices=False)
+            if sv[0] > 1.8 * max(sv[1], 1e-9):
+                b_axis = vt[0]
+        except np.linalg.LinAlgError:
+            pass
     dm = np.array([float(f["tree"].query(cent)[0]) for f in fams])
     dc = np.array([np.linalg.norm(f["cent"] - cent) for f in fams])
     order = list(np.argsort(dm)[:CAND_K])
@@ -133,10 +149,17 @@ def blob_rows(ev, fams, blob, t_cur=None):
     for i in cands:
         f = fams[i]
         others = [abs(f["t0"] - fams[j]["t0"]) for j in cands if j != i]
+        disp = cent - f["cent"]
+        dn_ = float(np.linalg.norm(disp))
+        ud = disp / dn_ if dn_ > 1e-6 else None
+        cos_fam = (abs(float(np.dot(ud, f["axis"])))
+                   if (ud is not None and f.get("axis") is not None) else np.nan)
+        cos_blob = (abs(float(np.dot(ud, b_axis)))
+                    if (ud is not None and b_axis is not None) else np.nan)
         rows.append([float(dm[i]), float(dc[i]), np.log10(max(f["e"], 1e-3)),
                      float(f["n"]), (min(others) if others else 999.0),
                      float(btpc in f["tpcs"]), np.log10(max(be, 1e-3)),
-                     float(rk[i]), float(i == inc)])
+                     float(rk[i]), float(i == inc), cos_fam, cos_blob])
         t0s.append(f["t0"])
     return np.array(rows, float), np.array(t0s, float), (cands.index(inc) if inc in cands else -1)
 
@@ -165,21 +188,33 @@ def harvest_file(fp):
 
 def fit(train_glob="v060dump_out/dumps/00000*_ev*.npz"):
     import multiprocessing as mp
-    files = [f for f in sorted(glob.glob(train_glob))
-             if not os.path.basename(f).startswith("0000001_")]
-    with mp.Pool(16) as pool:
-        parts = pool.map(harvest_file, files)
-    X = np.array(sum((p[0] for p in parts), []), float)
-    y = np.array(sum((p[1] for p in parts), []))
+    cache = os.path.join(_HERE, "le_rows_cache.npz")
+    if os.environ.get("LE_USE_CACHE") and os.path.exists(cache):
+        z = np.load(cache)
+        X, y = z["X"], z["y"]
+        print(f"(cached rows: {len(X)})")
+    else:
+        files = [f for f in sorted(glob.glob(train_glob))
+                 if not os.path.basename(f).startswith("0000001_")]
+        with mp.Pool(16) as pool:
+            parts = pool.map(harvest_file, files)
+        X = np.array(sum((p[0] for p in parts), []), float)
+        y = np.array(sum((p[1] for p in parts), []))
+        if os.environ.get("LE_USE_CACHE"):
+            np.savez_compressed(cache, X=X, y=y)
     if os.environ.get("LE_MODEL", "logistic") == "hgb":
         from sklearn.ensemble import HistGradientBoostingClassifier
         import joblib
+        sub_names = [s for s in os.environ.get("LE_SUBSET", "").split(",") if s]
+        sub_idx = [FEATS.index(s) for s in sub_names] if sub_names else list(range(len(FEATS)))
         clf = HistGradientBoostingClassifier(max_iter=300, max_depth=6,
                                              learning_rate=0.08)
-        clf.fit(X, y)
-        joblib.dump({"model": clf, "feats": FEATS},
+        clf.fit(X[:, sub_idx], y)
+        joblib.dump({"model": clf, "feats": [FEATS[i] for i in sub_idx],
+                     "sub_idx": sub_idx},
                     MODEL_JSON.replace(".json", "_hgb.joblib"))
-        print(f"{len(X)} rows (base {y.mean():.3f}) -> HGB saved")
+        print(f"{len(X)} rows (base {y.mean():.3f}) -> HGB saved "
+              f"({len(sub_idx)} feats: {[FEATS[i] for i in sub_idx]})")
         return
     from sklearn.linear_model import LogisticRegression
     mu, sd = X.mean(0), X.std(0) + 1e-9
@@ -196,7 +231,10 @@ def fit(train_glob="v060dump_out/dumps/00000*_ev*.npz"):
 
 def score(md, X):
     if "hgb" in md:
-        return md["hgb"].predict_proba(np.asarray(X, float))[:, 1]
+        Xa = np.asarray(X, float)
+        if md.get("sub"):
+            Xa = Xa[:, md["sub"]]
+        return md["hgb"].predict_proba(Xa)[:, 1]
     z = ((X - np.array(md["mu"])) / np.array(md["sd"])) @ np.array(md["coef"]) + md["b"]
     return 1.0 / (1.0 + np.exp(-z))
 
@@ -204,8 +242,8 @@ def score(md, X):
 def emulate(test_glob="v096EVO_out/dumps/*.npz"):
     if os.environ.get("LE_MODEL", "logistic") == "hgb":
         import joblib
-        _h = joblib.load(MODEL_JSON.replace(".json", "_hgb.joblib"))["model"]
-        md = {"hgb": _h}
+        _b = joblib.load(MODEL_JSON.replace(".json", "_hgb.joblib"))
+        md = {"hgb": _b["model"], "sub": _b.get("sub_idx")}
     else:
         md = json.load(open(MODEL_JSON))
     MARGINS = (0.0, 0.1, 0.2, 0.4, 0.6)

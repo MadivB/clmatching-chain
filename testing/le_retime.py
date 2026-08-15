@@ -36,7 +36,8 @@ def run_le_retime(ns: dict[str, Any], *, model_path: str | None = None,
     if model_path not in _MD:
         if model_path.endswith(".joblib"):
             import joblib
-            _MD[model_path] = {"hgb": joblib.load(model_path)["model"]}
+            _b = joblib.load(model_path)
+            _MD[model_path] = {"hgb": _b["model"], "sub": _b.get("sub_idx")}
         else:
             _MD[model_path] = json.load(open(model_path))
     md = _MD[model_path]
