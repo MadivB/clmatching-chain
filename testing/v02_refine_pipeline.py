@@ -80,7 +80,7 @@ def make_cos_pick(mode, cos_min=0.6, lam=1.0):
         dn = np.linalg.norm(R, axis=0)
         cos = np.zeros(curve.size)
         m = dn > 1e-9
-        cos[m] = (own @ R[:, m]) / (no * dn[m])
+        cos[: dn.size][m] = (own @ R[:, m]) / (no * dn[m])
         if mode == "gate":
             ok = cos >= cos_min
             if ok.any():

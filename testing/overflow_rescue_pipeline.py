@@ -125,7 +125,9 @@ def cos_curve(pred, resid, max_shift=SEARCH):
     nr = np.linalg.norm(R, axis=0)
     c = (own @ R) / np.maximum(no * nr, 1e-9)
     c[nr < 1e-6] = 0.0
-    return c if no > 1e-9 else np.zeros_like(c)
+    out = np.zeros(max_shift + 1)
+    out[: c.size] = c
+    return out if no > 1e-9 else np.zeros_like(out)
 
 
 def gated_argmin(curve, pred, resid, cos_sel, cos_window=0.0):
