@@ -9,7 +9,7 @@
 #SBATCH -o /global/cfs/cdirs/dune/users/yuxuan/NDLAr-full/CLMatching_v0.1_backboneOnly/testing/v025holdA_%j.log
 set -uo pipefail
 HERE=/global/cfs/cdirs/dune/users/yuxuan/NDLAr-full/CLMatching_v0.1_backboneOnly/testing
-PY=/global/common/software/nersc/pe/conda-envs/26.1.0/python-3.13/nersc-python/bin/python
+PY=/global/common/software/nersc9/pytorch/2.8.0/bin/python
 DATA=/global/cfs/cdirs/dunepro/people/abooth/nd-production/output/MiniProdN5/run-ndlar-flow/MiniProdN5p1_NDComplex_FHC.flow.full.sanddrift/FLOW/0000000
 FILES="$DATA/MiniProdN5p1_NDComplex_FHC.flow.full.sanddrift.0000004.FLOW.hdf5 \
 $DATA/MiniProdN5p1_NDComplex_FHC.flow.full.sanddrift.0000005.FLOW.hdf5 \

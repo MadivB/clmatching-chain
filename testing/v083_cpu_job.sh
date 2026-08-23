@@ -1,7 +1,7 @@
 #!/bin/bash
 HERE=/global/cfs/cdirs/dune/users/yuxuan/NDLAr-full/CLMatching_v0.1_backboneOnly/testing
 cd $HERE
-PY=/global/common/software/nersc/pe/conda-envs/26.1.0/python-3.13/nersc-python/bin/python
+PY=/global/common/software/nersc9/pytorch/2.8.0/bin/python
 $PY -u v083_transfer.py
 echo "=== importance ==="
 $PY -u - <<'PYEOF'

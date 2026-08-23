@@ -2,7 +2,7 @@
 # v0.6 (external frontend) over ALL 10 files WITH dumps -> TDR plots source.
 set -uo pipefail
 HERE=/global/cfs/cdirs/dune/users/yuxuan/NDLAr-full/CLMatching_v0.1_backboneOnly/testing
-PY=/global/common/software/nersc/pe/conda-envs/26.1.0/python-3.13/nersc-python/bin/python
+PY=/global/common/software/nersc9/pytorch/2.8.0/bin/python
 DATA=/global/cfs/cdirs/dunepro/people/abooth/nd-production/output/MiniProdN5/run-ndlar-flow/MiniProdN5p1_NDComplex_FHC.flow.full.sanddrift/FLOW/0000000
 FILES=""
 for i in 0000001 0000002 0000003 0000004 0000005 0000006 0000007 0000008 0000009 0000010; do

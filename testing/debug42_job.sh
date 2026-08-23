@@ -8,5 +8,5 @@
 #SBATCH -J debug42
 #SBATCH -o /global/cfs/cdirs/dune/users/yuxuan/NDLAr-full/CLMatching_v0.1_backboneOnly/testing/debug42_%j.log
 set -uo pipefail
-PY=/global/common/software/nersc/pe/conda-envs/26.1.0/python-3.13/nersc-python/bin/python
+PY=/global/common/software/nersc9/pytorch/2.8.0/bin/python
 $PY -u /global/cfs/cdirs/dune/users/yuxuan/NDLAr-full/CLMatching_v0.1_backboneOnly/testing/debug_label42.py
