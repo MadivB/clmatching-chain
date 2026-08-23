@@ -32,7 +32,7 @@ from v030_expansion import build_hit_graph, family_geodesics, weighted_scan
 PEAK = 105
 GAIN = 200.0
 CLIP = 60780.0
-SEARCH = 800
+SEARCH = 895
 
 
 def run_shower_tpc_pass(ns: dict[str, Any], *, hit_tpc: np.ndarray,

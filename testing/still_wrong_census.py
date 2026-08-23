@@ -28,7 +28,7 @@ from scipy.signal import fftconvolve
 
 PEAK, GAIN, CLIP = 105, 200.0, 60780.0
 COS_CUT, Z_CUT, EXCESS_GATE = 0.75, 2.0, 500.0
-GROUP_DT, MAX_N, SEARCH, CUT = 5.0, 3, 800, 10.0
+GROUP_DT, MAX_N, SEARCH, CUT = 5.0, 3, 895, 10.0
 COS_SEL, COS_WINDOW = 0.7, 0.15
 DUMP_MEV = 20.0
 

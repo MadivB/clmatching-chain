@@ -45,7 +45,7 @@ Z_CUT = 2.0
 EXCESS_GATE = 500.0
 GROUP_DT = 5.0
 MAX_N = 3
-SEARCH = 800
+SEARCH = 895
 
 
 def weighted_scan(pred, resid, w, max_shift=SEARCH):

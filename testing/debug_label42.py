@@ -15,7 +15,7 @@ import numpy as np
 import h5py
 from scipy.signal import fftconvolve
 
-PEAK, GAIN, CLIP, SEARCH, CUT = 105, 200.0, 60780.0, 800, 10.0
+PEAK, GAIN, CLIP, SEARCH, CUT = 105, 200.0, 60780.0, 895, 10.0
 
 from M5p1.first_stage_matching import load_first_stage_models, run_first_stage_charge_light_matching
 from M5p1.first_stage_matching.track_stage import fast_stack_images

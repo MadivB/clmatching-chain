@@ -20,7 +20,7 @@ from scipy.spatial import cKDTree
 PEAK = 105
 GAIN = 200.0
 CLIP = 60780.0
-SEARCH = 800
+SEARCH = 895
 CUT = 10.0
 
 # ---- tunables (fragmentation-/purity-biased defaults) ----

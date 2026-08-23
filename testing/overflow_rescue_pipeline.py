@@ -97,7 +97,7 @@ Z_CUT = 2.0
 EXCESS_GATE = 500.0
 GROUP_DT = 5.0
 MAX_N = 3
-SEARCH = 800
+SEARCH = 895
 CUT = 10.0
 VAR_CKPT = ("/global/cfs/cdirs/dune/users/yuxuan/NDLAr-full/NewMLSection/var_prediction/"
             "runs/var_run_perceiver_aligned_0001000_v2/best_model.pt")

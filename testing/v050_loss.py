@@ -30,7 +30,7 @@ from scipy.signal import fftconvolve
 GAIN = 200.0
 CLIP = 60780.0
 NOISE_ADC = 200.0
-SEARCH = 800
+SEARCH = 895
 
 
 def poisson_w(actual: np.ndarray, weight_pow: int = 2) -> np.ndarray:

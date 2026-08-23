@@ -40,7 +40,7 @@ import numpy as np
 import h5py
 
 CUT = 10.0
-SEARCH = 800
+SEARCH = 895
 CLIP = 60780.0
 DUMP_MIN_MEV = 20.0     # dump display state for wrong placements above this energy
 
