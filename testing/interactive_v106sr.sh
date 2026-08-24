@@ -1,6 +1,7 @@
 #!/bin/bash
 # v0.8.6 canonical + --evo + dumps on file 0000001 (failure-gallery source)
 set -uo pipefail
+export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1
 HERE=/global/cfs/cdirs/dune/users/yuxuan/NDLAr-full/CLMatching_v0.1_backboneOnly/testing
 PY=/global/common/software/nersc9/pytorch/2.8.0/bin/python
 DATA=/global/cfs/cdirs/dunepro/people/abooth/nd-production/output/MiniProdN5/run-ndlar-flow/MiniProdN5p1_NDComplex_FHC.flow.full.sanddrift/FLOW/0000000
