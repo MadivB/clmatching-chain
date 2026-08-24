@@ -26,6 +26,21 @@ coverage; **all-TPC** = every TPC. 126-event reference sample = files
 \* 39-event sample, pre length-gate fix — not comparable to later numbers.
 † file-0000001 same-node pair; 126-ev v0.8.6 row is the certified one.
 
+**2026-08-15 chain-wide corrections (no version bump):** (1) t0 search
+window 700/800 → **895** everywhere (user correction; upper edge = 1000
+ticks − PEAK 105), applied to all clones incl. frozen v0.2/v0.4.1/v0.6,
+AlphaRelease core, and the frontend; file-1 verification: metrics
+unchanged within noise (NS 96.49/95.70, LE 58.25), +2.4 % latency (the
+12 % longer scans), zero assignments >800 on this file. Required an
+off-by-one fix in the cos matched-filter family (peak past waveform end
+→ cos 0). (2) NERSC refresh killed the harness python (torch gone,
+user-site wiped) → all launch scripts repointed to the pytorch/2.8.0
+module python; the resulting 5× slowdown was an uncached failed
+`import cupy` per call in `pulse_shapes._get_xp` (~115k stat/ev) —
+probe now cached, 141 s/ev restored. (3) Eager shower absorption
+(`--shower-eat`, unversioned candidate) measured NULL — showers are 86 %
+light-fulfilled at recognition; see SHOWER_EAT_DESIGN.md.
+
 ---
 
 ## v0.1 – v0.3: foundations
