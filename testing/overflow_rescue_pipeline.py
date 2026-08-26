@@ -103,11 +103,38 @@ VAR_CKPT = ("/global/cfs/cdirs/dune/users/yuxuan/NDLAr-full/NewMLSection/var_pre
             "runs/var_run_perceiver_aligned_0001000_v2/best_model.pt")
 
 
+EDGE_PENALTY = False    # 2x2 boundary-hiding guard (HANDOFF_ND_threshold_association)
+EDGE_TAIL_TICKS = 75
+
+
+def _edge_penalty_vec(pred, w, max_shift):
+    """chi2 charge for predicted light shifted past the window end.
+
+    A cluster must not hide its light by sliding it out of the digitizer
+    window: hidden template columns are scored against each channel's
+    quiet-tail weight (mean w over the last EDGE_TAIL_TICKS). Suffix-summed
+    once per scan; interior shifts (tail fully visible) get zero penalty.
+    """
+    n = pred.shape[1]
+    wt = w[:, -EDGE_TAIL_TICKS:].mean(axis=1)
+    suf = np.cumsum((pred * pred)[:, ::-1], axis=1)[:, ::-1]
+    A = wt @ suf
+    pen = np.zeros(max_shift + 1)
+    s = np.arange(1, max_shift + 1)
+    idx = n - s
+    m = (idx >= 0) & (idx < n)
+    pen[1:][m] = A[idx[m]]
+    return pen
+
+
 def weighted_scan(pred, resid, w, max_shift=SEARCH):
     n = pred.shape[1]
     t1 = fftconvolve(w, (pred * pred)[:, ::-1], mode="full", axes=1)[:, n - 1: n - 1 + max_shift + 1].sum(axis=0)
     t2 = fftconvolve(w * resid, pred[:, ::-1], mode="full", axes=1)[:, n - 1: n - 1 + max_shift + 1].sum(axis=0)
-    return t1 + 2.0 * t2 + float(np.sum(w * resid * resid))
+    out = t1 + 2.0 * t2 + float(np.sum(w * resid * resid))
+    if EDGE_PENALTY:
+        out = out + _edge_penalty_vec(pred, w, max_shift)
+    return out
 
 
 def cos_curve(pred, resid, max_shift=SEARCH):
@@ -376,6 +403,10 @@ def main() -> int:
                          "placed showers (explicit or emergent) immediately "
                          "eat surrounding clusters to 60%% light fulfillment "
                          "(preference-margin ranked; contact/overflow guards)")
+    ap.add_argument("--edge-penalty", action="store_true",
+                    help="2x2-ported boundary-hiding guard: charge predicted "
+                         "light shifted past the window end against the "
+                         "channel quiet-tail weight in every scan")
     ap.add_argument("--le-retime", action="store_true",
                     help="stage 5: re-time LE blobs (noise + sub-1.5 MeV "
                          "clusters) by ranked candidate families on the "
@@ -550,6 +581,15 @@ def main() -> int:
                          "match a nearby compact BLOB (tracks excluded) via the light-detector y-map, "
                          "and MOVE it to the new t0 if that lowers this-TPC light loss")
     args = ap.parse_args()
+    if args.edge_penalty:
+        global EDGE_PENALTY
+        EDGE_PENALTY = True
+        if _HERE not in sys.path:
+            sys.path.insert(0, _HERE)
+        import v02_ordering_pipeline as _vop
+        import v030_expansion as _v30
+        _vop.EDGE_PENALTY = True
+        _v30.EDGE_PENALTY = True
     if args.merge_p2 and args.backbone == "prod":
         ap.error("--merge-p2 requires --backbone stack2 (or v02); the merge "
                  "lives in the backbone swap-in block")

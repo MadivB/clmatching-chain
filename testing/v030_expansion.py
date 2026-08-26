@@ -47,11 +47,38 @@ LOSS_MODE = "chi2"      # v0.5.0: "cubic"/"signed2" signed residual loss;
                         # (drive toward balance); see v050_loss.py
 
 
+EDGE_PENALTY = False    # 2x2 boundary-hiding guard (HANDOFF_ND_threshold_association)
+EDGE_TAIL_TICKS = 75
+
+
+def _edge_penalty_vec(pred, w, max_shift):
+    """chi2 charge for predicted light shifted past the window end.
+
+    A cluster must not hide its light by sliding it out of the digitizer
+    window: hidden template columns are scored against each channel's
+    quiet-tail weight (mean w over the last EDGE_TAIL_TICKS). Suffix-summed
+    once per scan; interior shifts (tail fully visible) get zero penalty.
+    """
+    n = pred.shape[1]
+    wt = w[:, -EDGE_TAIL_TICKS:].mean(axis=1)
+    suf = np.cumsum((pred * pred)[:, ::-1], axis=1)[:, ::-1]
+    A = wt @ suf
+    pen = np.zeros(max_shift + 1)
+    s = np.arange(1, max_shift + 1)
+    idx = n - s
+    m = (idx >= 0) & (idx < n)
+    pen[1:][m] = A[idx[m]]
+    return pen
+
+
 def weighted_scan(pred, resid, w, max_shift=SEARCH):
     n = pred.shape[1]
     t1 = fftconvolve(w, (pred * pred)[:, ::-1], mode="full", axes=1)[:, n - 1: n - 1 + max_shift + 1].sum(axis=0)
     t2 = fftconvolve(w * resid, pred[:, ::-1], mode="full", axes=1)[:, n - 1: n - 1 + max_shift + 1].sum(axis=0)
-    return t1 + 2.0 * t2 + float(np.sum(w * resid * resid))
+    out = t1 + 2.0 * t2 + float(np.sum(w * resid * resid))
+    if EDGE_PENALTY:
+        out = out + _edge_penalty_vec(pred, w, max_shift)
+    return out
 
 
 # --------------------------------------------------------------------------
