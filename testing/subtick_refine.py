@@ -88,7 +88,11 @@ def _quad(L):
 def run_subtick_refine(ns, *, ckpt=None, truth_t0=None, half_ticks=3.0,
                        step=0.25, group_merge=0.5, min_group_mev=0.0,
                        hit_refine=None, flow_path=None, chan_min_amp=500.0,
-                       chan_knn=6, dump_path=None):
+                       chan_knn=12, dump_path=None):
+    # chan_knn=12 + 1/d^2: best of the 60-config offline sweep (2026-08-23,
+    # file 1): per-hit sigma 7.79 ns, mechanism corr 0.346. The sweep is
+    # FLAT (corr 0.25-0.35 everywhere) - ND's per-channel information
+    # ceiling, not a tuning shortfall; see subtick_sweep.py.
     _paths()
     from pulse_shapes import timeinterpolation
     from ML_NDfull_perceiver import process_clusters_to_imageMaps
@@ -190,19 +194,23 @@ def run_subtick_refine(ns, *, ckpt=None, truth_t0=None, half_ticks=3.0,
     ts_groupE = ts.copy()
 
     # ---- stage F: per-channel fits -> per-hit inverse-distance weighting ----
+    chdump = [] if dump_path is not None else None
     if hit_refine:
         xyz = np.stack([x, y, z], 1)
         f_moves = []
-        for g in ginfo:
+        for gi_f, g in enumerate(ginfo):
             tg = g["t_new"]
             for c, img in g["imgs"].items():
                 if c not in sipm_pos or sipm_pos[c].shape[0] != n_ch:
                     continue
                 amp = img.max(axis=1)
-                keep = np.flatnonzero(amp >= chan_min_amp)
-                if keep.size < chan_knn:
-                    keep = np.argsort(amp)[::-1][:chan_knn]
-                keep = keep[amp[keep] > 1.0]
+                if chdump is not None:
+                    keep = np.flatnonzero(amp > 1.0)          # fit ALL lit channels for the offline sweep
+                else:
+                    keep = np.flatnonzero(amp >= chan_min_amp)
+                    if keep.size < chan_knn:
+                        keep = np.argsort(amp)[::-1][:chan_knn]
+                    keep = keep[amp[keep] > 1.0]
                 if not keep.size:
                     continue
                 st["f_ch_dropped"] += int((amp > 1.0).sum() - keep.size)
@@ -221,6 +229,16 @@ def run_subtick_refine(ns, *, ckpt=None, truth_t0=None, half_ticks=3.0,
                     xs, why = _quad(Lrc[r, i0 - 3: i0 + 4])
                     t_ch[r] = tg + float(offs[i0]) + (xs if why == "ok" else 0.0)
                 fit = np.isfinite(t_ch)
+                if chdump is not None and fit.any():
+                    chdump.append((gi_f, c, tg, keep[fit], amp[keep[fit]], t_ch[fit]))
+                if chdump is not None:
+                    sel = fit & (amp[keep] >= chan_min_amp)
+                    if sel.sum() < min(chan_knn, int(fit.sum())):
+                        order_a = np.argsort(np.where(fit, amp[keep], -1))[::-1]
+                        sel = np.zeros_like(fit)
+                        sel[order_a[:chan_knn]] = True
+                        sel &= fit
+                    fit = sel
                 if fit.sum() < 2:
                     continue
                 st["f_ch_fit"] += int(fit.sum())
@@ -233,7 +251,7 @@ def run_subtick_refine(ns, *, ckpt=None, truth_t0=None, half_ticks=3.0,
                 kk = min(chan_knn, rows.size)
                 near = np.argsort(d, axis=1)[:, :kk]
                 dn = np.take_along_axis(d, near, axis=1)
-                wn = 1.0 / np.maximum(dn, 1.0)
+                wn = 1.0 / np.square(np.maximum(dn, 1.0))
                 tn = tvals[near]
                 t_hit = (wn * tn).sum(axis=1) / wn.sum(axis=1)
                 f_moves.append(t_hit - ts[hidx])
@@ -254,6 +272,15 @@ def run_subtick_refine(ns, *, ckpt=None, truth_t0=None, half_ticks=3.0,
             ts_groupE=ts_groupE.astype(np.float32),
             ts_after=ts.astype(np.float32), e=e.astype(np.float32),
             group_id=group_id,
+            ch_gi=np.array([t[0] for t in chdump or []], np.int32),
+            ch_tpc=np.array([t[1] for t in chdump or []], np.int32),
+            ch_tg=np.array([t[2] for t in chdump or []], np.float32),
+            ch_rows=np.array([r for t in chdump or [] for r in t[3]], np.int32),
+            ch_amp=np.array([a for t in chdump or [] for a in t[4]], np.float32),
+            ch_t=np.array([v for t in chdump or [] for v in t[5]], np.float32),
+            ch_n=np.array([len(t[3]) for t in chdump or []], np.int32),
+            hit_x=x.astype(np.float32), hit_y=y.astype(np.float32),
+            hit_z=z.astype(np.float32), hit_tpc=tpc.astype(np.int32),
             truth=(np.asarray(truth_t0, np.float32) if truth_t0 is not None
                    else np.full(ts.size, np.nan, np.float32)))
     return st
