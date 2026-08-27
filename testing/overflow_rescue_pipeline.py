@@ -403,6 +403,14 @@ def main() -> int:
                          "placed showers (explicit or emergent) immediately "
                          "eat surrounding clusters to 60%% light fulfillment "
                          "(preference-margin ranked; contact/overflow guards)")
+    ap.add_argument("--subtick", action="store_true",
+                    help="stage 6: continuous t0s - interaction-level "
+                         "re-prediction + 0.25-tick grid + analytic "
+                         "quadratic refinement (2x2 stage E port); "
+                         "membership never touched")
+    ap.add_argument("--subtick-dump", default="",
+                    help="dir for per-hit (ts_before, ts_after, truth, e) "
+                         "npz dumps from the subtick stage")
     ap.add_argument("--edge-penalty", action="store_true",
                     help="2x2-ported boundary-hiding guard: charge predicted "
                          "light shifted past the window end against the "
@@ -2192,6 +2200,22 @@ def main() -> int:
                     chg = np.isfinite(ts_bnf) & np.isfinite(ts_anf) & (ts_bnf != ts_anf)
                     st_nf["moved_e_frac"] = float(e_pos[chg].sum() / max(e_pos.sum(), 1e-9))
                     p3_row["new_flash"] = st_nf
+                if args.subtick:
+                    if _HERE not in sys.path:
+                        sys.path.insert(0, _HERE)
+                    from subtick_refine import run_subtick_refine
+                    t_st6 = time.time()
+                    _dp6 = None
+                    if args.subtick_dump:
+                        os.makedirs(args.subtick_dump, exist_ok=True)
+                        _ftag6 = os.path.basename(file_path).split(".")[-3]
+                        _dp6 = os.path.join(args.subtick_dump,
+                                            f"{_ftag6}_ev{ev_id}.npz")
+                    st6 = run_subtick_refine(
+                        ns1, ckpt=args.light_ckpt, truth_t0=truth_t0,
+                        min_group_mev=3.0, dump_path=_dp6)
+                    st6["time_s"] = round(time.time() - t_st6, 2)
+                    p3_row["subtick"] = st6
                 if args.shower_tpc:
                     if _HERE not in sys.path:
                         sys.path.insert(0, _HERE)
