@@ -22,6 +22,7 @@ coverage; **all-TPC** = every TPC. 126-event reference sample = files
 | v0.8.6 | 08-14 | 96.47 | 95.60 | + skip V2 → **115 s/ev single-node latency** |
 | v0.8.7 | 08-14 | 96.46 | 95.61 | support-restricted overflow gate (semantics fix) |
 | v0.8.8 | 08-14 | 96.49 | 95.64 | stage 5: LE blip re-timing (LE class 58.7→60.9) |
+| v0.8.9 | 08-23 | 96.50 | 95.65 | 895 t0 window + edge penalty (2x2-ported boundary-hiding guard) |
 
 \* 39-event sample, pre length-gate fix — not comparable to later numbers.
 † file-0000001 same-node pair; 126-ev v0.8.6 row is the certified one.
@@ -129,6 +130,16 @@ light-fulfilled at recognition; see SHOWER_EAT_DESIGN.md.
   "fits nowhere" selects broken TEMPLATES, not misplacements (85–93 % of
   declined clusters were correctly placed) — misplaced clusters by
   definition fit well somewhere (that low-r signal IS PASS-2 nomination).
+- **v0.8.9** (08-23, tag) — **895 t0 window + edge penalty**. The window
+  correction (user; upper edge = 1000 − PEAK) naively opens boundary
+  hiding: predicted light shifted past the window end leaves the χ²
+  (FFT zero-padding), so no-match clusters sink at t0=895 (synthetic:
+  −53k below interior). Guard ported from the user's 2x2 development
+  (HANDOFF_ND_threshold_association.md): hidden template columns charged
+  against the channel quiet-tail weight, suffix-summed, in every
+  weighted_scan. File 1: 12/13 events up, 0 down. 126-ev certification:
+  **96.50 / 95.65**, LE 59.22 (all ≥ v0.8.8), +2 % latency (longer
+  scans). Canonical flags += `--edge-penalty`.
 - **Variance weighting** (08-13) — restored the never-loading variance
   perceiver, tested quadrature weighting: tie in-band, degrades above;
   pulls show Poisson-only already over-covers (0.76 vs 1.0) — any additive
