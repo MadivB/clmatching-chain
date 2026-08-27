@@ -408,6 +408,10 @@ def main() -> int:
                          "re-prediction + 0.25-tick grid + analytic "
                          "quadratic refinement (2x2 stage E port); "
                          "membership never touched")
+    ap.add_argument("--subtick-hit", action="store_true",
+                    help="stage F: per-HIT t0s from per-channel fits + "
+                         "6-nearest-SiPM inverse-distance weighting "
+                         "(implies --subtick)")
     ap.add_argument("--subtick-dump", default="",
                     help="dir for per-hit (ts_before, ts_after, truth, e) "
                          "npz dumps from the subtick stage")
@@ -2200,7 +2204,7 @@ def main() -> int:
                     chg = np.isfinite(ts_bnf) & np.isfinite(ts_anf) & (ts_bnf != ts_anf)
                     st_nf["moved_e_frac"] = float(e_pos[chg].sum() / max(e_pos.sum(), 1e-9))
                     p3_row["new_flash"] = st_nf
-                if args.subtick:
+                if args.subtick or args.subtick_hit:
                     if _HERE not in sys.path:
                         sys.path.insert(0, _HERE)
                     from subtick_refine import run_subtick_refine
@@ -2213,7 +2217,9 @@ def main() -> int:
                                             f"{_ftag6}_ev{ev_id}.npz")
                     st6 = run_subtick_refine(
                         ns1, ckpt=args.light_ckpt, truth_t0=truth_t0,
-                        min_group_mev=3.0, dump_path=_dp6)
+                        min_group_mev=3.0,
+                        hit_refine=("channel6" if args.subtick_hit else None),
+                        flow_path=file_path, dump_path=_dp6)
                     st6["time_s"] = round(time.time() - t_st6, 2)
                     p3_row["subtick"] = st6
                 if args.shower_tpc:

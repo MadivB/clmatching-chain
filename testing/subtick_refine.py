@@ -1,11 +1,20 @@
-"""Stage 6 (--subtick): continuous t0s — interaction-level re-prediction +
-0.25-tick grid + analytic quadratic refinement (stage E of the 2x2 handoff,
-HANDOFF_ND_threshold_association.md).
+"""Stages 6 (E) + 6.5 (F): continuous t0s (2x2 handoff port).
 
-Membership is NEVER touched: each final-t0 group keeps its hits; only the
-group time moves (grid +-3 ticks, quadratic |x*| <= 0.5). Each group's light
-is re-predicted from scratch as ONE bag of hits (collective render - the
-v097-validated form); other groups' re-predicted light forms the base.
+Stage E (--subtick): interaction-level re-prediction per final-t0 group
+(one collective render - the v097-validated form) + 0.25-tick grid +-3 +
+analytic quadratic minimum. Membership NEVER touched.
+
+Stage F (--subtick-hit): per-HIT t0s. Every light channel of a group x TPC
+gets its OWN grid+quadratic fit (chi2 restricted to that channel, other
+groups as base); channels filtered by predicted peak amplitude
+(chan_min_amp, topped up to >= chan_knn by amplitude); each member hit
+takes the inverse-distance-weighted mean of its chan_knn nearest fitted
+channels (3D hit -> SiPM position from geometry_info/sipm_abs_pos, rows
+ordered side0-then-side1 ascending y as in the light image).
+
+NO calibration constant anywhere (user: a global bias is fine - absolute
+time is not needed).
+
 ND adaptation: groups are exact final-t0 values (merge 0.5 tick), NOT the
 2x2's 10-tick merge - distinct ND families can sit 2-10 ticks apart.
 """
@@ -23,13 +32,18 @@ DEFAULT_CKPT = ("/global/cfs/cdirs/dune/users/yuxuan/NDLAr-full/NewMLSection/"
 GAIN, CLIP = 200.0, 60780.0
 S2, S4 = 1.75, 0.765625          # sums over x in {-0.75..0.75} step 0.25
 _MODEL = {}
+_SIPM = {}
+
+
+def _paths():
+    for p in (_BASE, os.path.join(_BASE, "NewMLSection"), os.path.join(_BASE, "M5p1")):
+        if p not in sys.path:
+            sys.path.insert(0, p)
 
 
 def _get_model(ckpt):
     if ckpt not in _MODEL:
-        for p in (_BASE, os.path.join(_BASE, "NewMLSection"), os.path.join(_BASE, "M5p1")):
-            if p not in sys.path:
-                sys.path.insert(0, p)
+        _paths()
         from ML_NDfull_perceiver import load_perceiver_model
         model, _meta = load_perceiver_model(ckpt)
         template = np.load(os.path.join(_BASE, "assets", "avg_pulse.npy")).astype(np.float32) / np.float32(999.0)
@@ -37,11 +51,29 @@ def _get_model(ckpt):
     return _MODEL[ckpt]
 
 
-def _quad_refine(L):
-    """Analytic quadratic minimum over 7 grid losses around the argmin.
+def build_sipm_positions(flow_path):
+    """{light_tpc: (n_rows, 3) abs positions}, rows in light-image order."""
+    if flow_path not in _SIPM:
+        _paths()
+        import h5py
+        from first_stage_matching.io import build_light_channel_order
+        from lut import LUT
+        with h5py.File(flow_path, "r") as h5:
+            order, n_light = build_light_channel_order(h5)
+            ap = LUT.from_array(h5["geometry_info/sipm_abs_pos"].attrs["meta"],
+                                h5["geometry_info/sipm_abs_pos/data"])
+            pos = {}
+            for t in range(n_light):
+                rows = order.get(t) or []
+                if rows:
+                    pos[t] = np.array([np.asarray(ap[(a, c)][0], np.float64)
+                                       for a, c in rows])
+        _SIPM[flow_path] = pos
+    return _SIPM[flow_path]
 
-    L: losses at x = {-0.75,-0.5,-0.25,0,0.25,0.5,0.75} ticks around the
-    discrete argmin. Returns dt in ticks (0.0 on any guard)."""
+
+def _quad(L):
+    """Analytic quadratic minimum from 7 losses around the argmin (ticks)."""
     x = np.arange(-3, 4) * 0.25
     b = float((x * L).sum()) / S2
     a = float(((x * x * L).sum() - (S2 / 7.0) * L.sum())) / (S4 - S2 * S2 / 7.0)
@@ -53,19 +85,15 @@ def _quad_refine(L):
     return float(xs), "ok"
 
 
-CAL_TICKS = 0.304   # per-detector timing calibration, MEASURED on ND file
-                    # 0000001 (2026-08-23): the refined chi2 minimum sits
-                    # +4.86 ns late of truth (template-shape systematic,
-                    # analog of the 2x2's -3.56 ns). Subtracted from every
-                    # refined time; re-measure per detector/template.
-
-
 def run_subtick_refine(ns, *, ckpt=None, truth_t0=None, half_ticks=3.0,
                        step=0.25, group_merge=0.5, min_group_mev=0.0,
-                       cal_ticks=CAL_TICKS, dump_path=None):
+                       hit_refine=None, flow_path=None, chan_min_amp=500.0,
+                       chan_knn=6, dump_path=None):
+    _paths()
     from pulse_shapes import timeinterpolation
     from ML_NDfull_perceiver import process_clusters_to_imageMaps
     model, template = _get_model(ckpt or DEFAULT_CKPT)
+    sipm_pos = build_sipm_positions(flow_path) if (hit_refine and flow_path) else {}
 
     ts = np.asarray(ns["hit_timestamps"], dtype=np.float64)
     ts_before = ts.copy()
@@ -80,18 +108,19 @@ def run_subtick_refine(ns, *, ckpt=None, truth_t0=None, half_ticks=3.0,
 
     ok = np.isfinite(ts) & (ts >= 0) & (tpc >= 0) & (tpc < n_light)
     st = {"n_groups": 0, "n_refined": 0, "n_nonconvex": 0, "n_range": 0,
-          "n_edge": 0, "dt_max": 0.0, "dt_rms": 0.0}
+          "n_edge": 0, "dt_max": 0.0, "dt_rms": 0.0,
+          "f_ch_fit": 0, "f_ch_dropped": 0, "f_hits": 0, "f_dt_rms": 0.0}
     if not ok.any():
         return st
 
-    # exact-value groups (merge within group_merge ticks)
     vals = np.sort(np.unique(ts[ok]))
     groups, cur = [], [vals[0]]
     for v in vals[1:]:
         if v - cur[-1] <= group_merge:
             cur.append(v)
         else:
-            groups.append(cur); cur = [v]
+            groups.append(cur)
+            cur = [v]
     groups.append(cur)
 
     ginfo = []
@@ -106,7 +135,6 @@ def run_subtick_refine(ns, *, ckpt=None, truth_t0=None, half_ticks=3.0,
     if not ginfo:
         return st
 
-    # collective re-prediction per group (one bag of hits, one forward pass)
     for g in ginfo:
         m = g["mask"]
         imgs, _ = process_clusters_to_imageMaps(
@@ -117,17 +145,18 @@ def run_subtick_refine(ns, *, ckpt=None, truth_t0=None, half_ticks=3.0,
         g["sup"] = {c: np.flatnonzero(img.max(axis=1) > 1.0)
                     for c, img in g["imgs"].items()}
 
-    # total re-predicted field at current times
     total = np.zeros_like(actual)
     for g in ginfo:
         for c, img in g["imgs"].items():
             total[c] += timeinterpolation(img, shift=g["t"], baseline=0)
 
     offs = np.arange(-half_ticks, half_ticks + 1e-9, step)
+    group_id = np.full(ts.size, -1, np.int32)
+
+    # ---- stage E: one time per group ----
     dts = []
-    for g in ginfo:
-        own = {c: timeinterpolation(img, shift=g["t"], baseline=0)
-               for c, img in g["imgs"].items()}
+    for gi, g in enumerate(ginfo):
+        group_id[g["mask"]] = gi
         curve = np.zeros(offs.size)
         any_sup = False
         for c, img in g["imgs"].items():
@@ -135,36 +164,96 @@ def run_subtick_refine(ns, *, ckpt=None, truth_t0=None, half_ticks=3.0,
             if not ch.size:
                 continue
             any_sup = True
-            base = total[c][ch] - own[c][ch]
+            own = timeinterpolation(img, shift=g["t"], baseline=0)
+            base = total[c][ch] - own[ch]
             a_c, w_c = actual[c][ch], w_full[c][ch]
             for k, dt in enumerate(offs):
                 pred = np.minimum(base + timeinterpolation(img, shift=g["t"] + dt, baseline=0)[ch], CLIP)
-                curve[k] += float((w_c * (pred - a_c) ** 2).sum())
+                curve[k] += float((w_c * np.square(pred - a_c)).sum())
+        g["t_new"] = g["t"]
         if not any_sup:
             continue
         i0 = int(np.argmin(curve))
         if i0 < 3 or i0 > offs.size - 4:
             st["n_edge"] += 1
             continue
-        xs, why = _quad_refine(curve[i0 - 3: i0 + 4])
+        xs, why = _quad(curve[i0 - 3: i0 + 4])
         if why == "nonconvex":
             st["n_nonconvex"] += 1
         elif why == "range":
             st["n_range"] += 1
-        dt = float(offs[i0] + xs) - float(cal_ticks)
-        ts[g["mask"]] = ts[g["mask"]] + dt      # per-hit shift keeps intra-group offsets
+        dt = float(offs[i0] + xs)   # NO calibration (user: global bias is fine)
+        g["t_new"] = g["t"] + dt
+        ts[g["mask"]] = ts[g["mask"]] + dt
         dts.append(dt)
         st["n_refined"] += 1
+    ts_groupE = ts.copy()
+
+    # ---- stage F: per-channel fits -> per-hit inverse-distance weighting ----
+    if hit_refine:
+        xyz = np.stack([x, y, z], 1)
+        f_moves = []
+        for g in ginfo:
+            tg = g["t_new"]
+            for c, img in g["imgs"].items():
+                if c not in sipm_pos or sipm_pos[c].shape[0] != n_ch:
+                    continue
+                amp = img.max(axis=1)
+                keep = np.flatnonzero(amp >= chan_min_amp)
+                if keep.size < chan_knn:
+                    keep = np.argsort(amp)[::-1][:chan_knn]
+                keep = keep[amp[keep] > 1.0]
+                if not keep.size:
+                    continue
+                st["f_ch_dropped"] += int((amp > 1.0).sum() - keep.size)
+                own = timeinterpolation(img, shift=tg, baseline=0)
+                base = total[c][keep] - own[keep]
+                a_c, w_c = actual[c][keep], w_full[c][keep]
+                Lrc = np.zeros((keep.size, offs.size))
+                for k, dt in enumerate(offs):
+                    pred = np.minimum(base + timeinterpolation(img, shift=tg + dt, baseline=0)[keep], CLIP)
+                    Lrc[:, k] = (w_c * np.square(pred - a_c)).sum(axis=1)
+                t_ch = np.full(keep.size, np.nan)
+                for r in range(keep.size):
+                    i0 = int(np.argmin(Lrc[r]))
+                    if i0 < 3 or i0 > offs.size - 4:
+                        continue
+                    xs, why = _quad(Lrc[r, i0 - 3: i0 + 4])
+                    t_ch[r] = tg + float(offs[i0]) + (xs if why == "ok" else 0.0)
+                fit = np.isfinite(t_ch)
+                if fit.sum() < 2:
+                    continue
+                st["f_ch_fit"] += int(fit.sum())
+                rows, tvals = keep[fit], t_ch[fit]
+                ppos = sipm_pos[c][rows]
+                hidx = np.flatnonzero(g["mask"] & (tpc == c))
+                if not hidx.size:
+                    continue
+                d = np.linalg.norm(xyz[hidx][:, None, :] - ppos[None, :, :], axis=2)
+                kk = min(chan_knn, rows.size)
+                near = np.argsort(d, axis=1)[:, :kk]
+                dn = np.take_along_axis(d, near, axis=1)
+                wn = 1.0 / np.maximum(dn, 1.0)
+                tn = tvals[near]
+                t_hit = (wn * tn).sum(axis=1) / wn.sum(axis=1)
+                f_moves.append(t_hit - ts[hidx])
+                ts[hidx] = t_hit
+                st["f_hits"] += int(hidx.size)
+        if f_moves:
+            mv = np.concatenate(f_moves)
+            st["f_dt_rms"] = round(float(np.sqrt(np.square(mv).mean())), 3)
 
     ns["hit_timestamps"] = ts
     if dts:
         d = np.abs(np.array(dts))
         st["dt_max"] = round(float(d.max()), 3)
-        st["dt_rms"] = round(float(np.sqrt((d ** 2).mean())), 3)
+        st["dt_rms"] = round(float(np.sqrt(np.square(d).mean())), 3)
     if dump_path is not None:
         np.savez_compressed(
             dump_path, ts_before=ts_before.astype(np.float32),
+            ts_groupE=ts_groupE.astype(np.float32),
             ts_after=ts.astype(np.float32), e=e.astype(np.float32),
+            group_id=group_id,
             truth=(np.asarray(truth_t0, np.float32) if truth_t0 is not None
                    else np.full(ts.size, np.nan, np.float32)))
     return st
