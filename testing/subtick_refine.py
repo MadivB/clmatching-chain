@@ -4,7 +4,8 @@ Stage E (--subtick): interaction-level re-prediction per final-t0 group
 (one collective render - the v097-validated form) + 0.25-tick grid +-3 +
 analytic quadratic minimum. Membership NEVER touched.
 
-Stage F (--subtick-hit): per-HIT t0s. Every light channel of a group x TPC
+Stage F (--subtick-hit, EXPERIMENTAL - parked on the git branch
+`intra-hit-development`; NOT part of v1): per-HIT t0s. Every light channel of a group x TPC
 gets its OWN grid+quadratic fit (chi2 restricted to that channel, other
 groups as base); channels filtered by predicted peak amplitude
 (chan_min_amp, topped up to >= chan_knn by amplitude); each member hit
@@ -149,13 +150,18 @@ def run_subtick_refine(ns, *, ckpt=None, truth_t0=None, half_ticks=3.0,
     if not ginfo:
         return st
 
-    for g in ginfo:
-        m = g["mask"]
-        imgs, _ = process_clusters_to_imageMaps(
-            x[m], y[m], z[m], e[m], tpc[m], np.zeros(int(m.sum()), np.int64),
-            model=model, template=template)
+    all_m = np.zeros(ts.size, bool)
+    glab = np.full(ts.size, -1, np.int64)
+    for gi, g in enumerate(ginfo):
+        all_m |= g["mask"]
+        glab[g["mask"]] = gi
+    imgs_all, _ = process_clusters_to_imageMaps(
+        x[all_m], y[all_m], z[all_m], e[all_m], tpc[all_m], glab[all_m],
+        model=model, template=template)          # ONE batched forward pass
+    for gi, g in enumerate(ginfo):
         g["imgs"] = {int(c): np.asarray(v, np.float64)
-                     for (_l, c), v in imgs.items() if int(c) < n_light}
+                     for (l, c), v in imgs_all.items()
+                     if int(l) == gi and int(c) < n_light}
         g["sup"] = {c: np.flatnonzero(img.max(axis=1) > 1.0)
                     for c, img in g["imgs"].items()}
 

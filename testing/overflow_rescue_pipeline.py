@@ -409,9 +409,9 @@ def main() -> int:
                          "quadratic refinement (2x2 stage E port); "
                          "membership never touched")
     ap.add_argument("--subtick-hit", action="store_true",
-                    help="stage F: per-HIT t0s from per-channel fits + "
-                         "6-nearest-SiPM inverse-distance weighting "
-                         "(implies --subtick)")
+                    help="EXPERIMENTAL (parked on git branch "
+                         "intra-hit-development; NOT part of v1): stage F "
+                         "per-HIT t0s from per-channel fits (implies --subtick)")
     ap.add_argument("--subtick-dump", default="",
                     help="dir for per-hit (ts_before, ts_after, truth, e) "
                          "npz dumps from the subtick stage")
