@@ -127,8 +127,40 @@ def _edge_penalty_vec(pred, w, max_shift):
     return pen
 
 
+SCAN_TEMPLATE = None    # rank-1 fast path: set to the shared pulse template
+                        # (avg_pulse/999) to collapse multi-channel scans to
+                        # one 1-D correlation - exact same math, the channel
+                        # sum factors out of the chi2. Verified per call.
+
+
+def _rank1_amp(pred, tmpl, tmax):
+    amp = pred.max(axis=1) / tmax
+    ok = np.allclose(pred, amp[:, None] * tmpl[None, :], rtol=1e-3, atol=0.5)
+    return (amp if ok else None)
+
+
 def weighted_scan(pred, resid, w, max_shift=SEARCH):
     n = pred.shape[1]
+    if SCAN_TEMPLATE is not None and pred.shape[1] == SCAN_TEMPLATE.size:
+        tmpl = SCAN_TEMPLATE
+        amp = _rank1_amp(np.asarray(pred, np.float64), tmpl, float(tmpl.max()))
+        if amp is not None:
+            w2 = (w * np.square(amp)[:, None]).sum(axis=0)[None, :]
+            wr = (w * resid * amp[:, None]).sum(axis=0)[None, :]
+            t1 = fftconvolve(w2, np.square(tmpl)[None, ::-1], mode="full", axes=1)[0, n - 1: n - 1 + max_shift + 1]
+            t2 = fftconvolve(wr, tmpl[None, ::-1], mode="full", axes=1)[0, n - 1: n - 1 + max_shift + 1]
+            out = t1 + 2.0 * t2 + float(np.sum(w * resid * resid))
+            if EDGE_PENALTY:
+                wt = w[:, -EDGE_TAIL_TICKS:].mean(axis=1)
+                suf = np.cumsum(np.square(tmpl)[::-1])[::-1]
+                A = float((wt * np.square(amp)).sum()) * suf
+                pen = np.zeros(max_shift + 1)
+                sh = np.arange(1, max_shift + 1)
+                idx = n - sh
+                m = (idx >= 0) & (idx < n)
+                pen[1:][m] = A[idx[m]]
+                out = out + pen
+            return out
     t1 = fftconvolve(w, (pred * pred)[:, ::-1], mode="full", axes=1)[:, n - 1: n - 1 + max_shift + 1].sum(axis=0)
     t2 = fftconvolve(w * resid, pred[:, ::-1], mode="full", axes=1)[:, n - 1: n - 1 + max_shift + 1].sum(axis=0)
     out = t1 + 2.0 * t2 + float(np.sum(w * resid * resid))
@@ -415,6 +447,10 @@ def main() -> int:
     ap.add_argument("--subtick-dump", default="",
                     help="dir for per-hit (ts_before, ts_after, truth, e) "
                          "npz dumps from the subtick stage")
+    ap.add_argument("--fast-scan", action="store_true",
+                    help="rank-1 scan fast path: collapse multi-channel FFT "
+                         "scans to one 1-D template correlation (exact - "
+                         "rank-1 structure verified per call, else fallback)")
     ap.add_argument("--edge-penalty", action="store_true",
                     help="2x2-ported boundary-hiding guard: charge predicted "
                          "light shifted past the window end against the "
@@ -602,6 +638,16 @@ def main() -> int:
         import v030_expansion as _v30
         _vop.EDGE_PENALTY = True
         _v30.EDGE_PENALTY = True
+    if args.fast_scan:
+        global SCAN_TEMPLATE
+        if _HERE not in sys.path:
+            sys.path.insert(0, _HERE)
+        import v02_ordering_pipeline as _vop2
+        import v030_expansion as _v302
+        _tmplfs = np.load(os.path.join(BASE_DIR, "assets", "avg_pulse.npy")).astype(np.float64) / 999.0
+        SCAN_TEMPLATE = _tmplfs
+        _vop2.SCAN_TEMPLATE = _tmplfs
+        _v302.SCAN_TEMPLATE = _tmplfs
     if args.merge_p2 and args.backbone == "prod":
         ap.error("--merge-p2 requires --backbone stack2 (or v02); the merge "
                  "lives in the backbone swap-in block")

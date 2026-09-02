@@ -81,8 +81,40 @@ def _edge_penalty_vec(pred, w, max_shift):
     return pen
 
 
+SCAN_TEMPLATE = None    # rank-1 fast path: set to the shared pulse template
+                        # (avg_pulse/999) to collapse multi-channel scans to
+                        # one 1-D correlation - exact same math, the channel
+                        # sum factors out of the chi2. Verified per call.
+
+
+def _rank1_amp(pred, tmpl, tmax):
+    amp = pred.max(axis=1) / tmax
+    ok = np.allclose(pred, amp[:, None] * tmpl[None, :], rtol=1e-3, atol=0.5)
+    return (amp if ok else None)
+
+
 def weighted_scan(pred, resid, w, max_shift=SEARCH):
     n = pred.shape[1]
+    if SCAN_TEMPLATE is not None and pred.shape[1] == SCAN_TEMPLATE.size:
+        tmpl = SCAN_TEMPLATE
+        amp = _rank1_amp(np.asarray(pred, np.float64), tmpl, float(tmpl.max()))
+        if amp is not None:
+            w2 = (w * np.square(amp)[:, None]).sum(axis=0)[None, :]
+            wr = (w * resid * amp[:, None]).sum(axis=0)[None, :]
+            t1 = fftconvolve(w2, np.square(tmpl)[None, ::-1], mode="full", axes=1)[0, n - 1: n - 1 + max_shift + 1]
+            t2 = fftconvolve(wr, tmpl[None, ::-1], mode="full", axes=1)[0, n - 1: n - 1 + max_shift + 1]
+            out = t1 + 2.0 * t2 + float(np.sum(w * resid * resid))
+            if EDGE_PENALTY:
+                wt = w[:, -EDGE_TAIL_TICKS:].mean(axis=1)
+                suf = np.cumsum(np.square(tmpl)[::-1])[::-1]
+                A = float((wt * np.square(amp)).sum()) * suf
+                pen = np.zeros(max_shift + 1)
+                sh = np.arange(1, max_shift + 1)
+                idx = n - sh
+                m = (idx >= 0) & (idx < n)
+                pen[1:][m] = A[idx[m]]
+                out = out + pen
+            return out
     t1 = fftconvolve(w, (pred * pred)[:, ::-1], mode="full", axes=1)[:, n - 1: n - 1 + max_shift + 1].sum(axis=0)
     t2 = fftconvolve(w * resid, pred[:, ::-1], mode="full", axes=1)[:, n - 1: n - 1 + max_shift + 1].sum(axis=0)
     out = t1 + 2.0 * t2 + float(np.sum(w * resid * resid))
