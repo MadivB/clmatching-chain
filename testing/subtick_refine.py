@@ -72,23 +72,33 @@ def build_sipm_positions(flow_path):
     return _SIPM[flow_path]
 
 
-def _quad(L):
-    """Analytic quadratic minimum from 7 losses around the argmin (ticks)."""
-    x = np.arange(-3, 4) * 0.25
-    b = float((x * L).sum()) / S2
-    a = float(((x * x * L).sum() - (S2 / 7.0) * L.sum())) / (S4 - S2 * S2 / 7.0)
+QUAD_HW = 4          # fit window half-width in 0.25-tick steps: 4 -> +-1 tick
+QUAD_GUARD = 0.75    # vertex acceptance [ticks] (user 2026-08-23: widen from
+                     # the 2x2's 7-point/0.5 - the vertex sometimes lands out)
+
+
+def _quad(L, hw=None, guard=None):
+    """Analytic quadratic minimum from 2*hw+1 losses around the argmin (ticks)."""
+    hw = QUAD_HW if hw is None else hw
+    guard = QUAD_GUARD if guard is None else guard
+    x = np.arange(-hw, hw + 1) * 0.25
+    n = float(x.size)
+    s2 = float((x * x).sum())
+    s4 = float((x ** 4).sum())
+    b = float((x * L).sum()) / s2
+    a = float(((x * x * L).sum() - (s2 / n) * L.sum())) / (s4 - s2 * s2 / n)
     if a <= 0:
         return 0.0, "nonconvex"
     xs = -b / (2.0 * a)
-    if abs(xs) > 0.5:
+    if abs(xs) > guard:
         return 0.0, "range"
     return float(xs), "ok"
 
 
 def run_subtick_refine(ns, *, ckpt=None, truth_t0=None, half_ticks=3.0,
                        step=0.25, group_merge=0.5, min_group_mev=0.0,
-                       hit_refine=None, flow_path=None, chan_min_amp=500.0,
-                       chan_knn=12, dump_path=None):
+                       hit_refine=None, flow_path=None, chan_min_amp=400.0,
+                       chan_amp_floor=300.0, chan_knn=12, dump_path=None):
     # chan_knn=12 + 1/d^2: best of the 60-config offline sweep (2026-08-23,
     # file 1): per-hit sigma 7.79 ns, mechanism corr 0.346. The sweep is
     # FLAT (corr 0.25-0.35 everywhere) - ND's per-channel information
@@ -178,10 +188,10 @@ def run_subtick_refine(ns, *, ckpt=None, truth_t0=None, half_ticks=3.0,
         if not any_sup:
             continue
         i0 = int(np.argmin(curve))
-        if i0 < 3 or i0 > offs.size - 4:
+        if i0 < QUAD_HW or i0 > offs.size - QUAD_HW - 1:
             st["n_edge"] += 1
             continue
-        xs, why = _quad(curve[i0 - 3: i0 + 4])
+        xs, why = _quad(curve[i0 - QUAD_HW: i0 + QUAD_HW + 1])
         if why == "nonconvex":
             st["n_nonconvex"] += 1
         elif why == "range":
@@ -209,8 +219,9 @@ def run_subtick_refine(ns, *, ckpt=None, truth_t0=None, half_ticks=3.0,
                 else:
                     keep = np.flatnonzero(amp >= chan_min_amp)
                     if keep.size < chan_knn:
-                        keep = np.argsort(amp)[::-1][:chan_knn]
-                    keep = keep[amp[keep] > 1.0]
+                        extra = np.flatnonzero((amp >= chan_amp_floor) & (amp < chan_min_amp))
+                        extra = extra[np.argsort(amp[extra])[::-1]]
+                        keep = np.concatenate([keep, extra[:chan_knn - keep.size]])
                 if not keep.size:
                     continue
                 st["f_ch_dropped"] += int((amp > 1.0).sum() - keep.size)
@@ -224,9 +235,9 @@ def run_subtick_refine(ns, *, ckpt=None, truth_t0=None, half_ticks=3.0,
                 t_ch = np.full(keep.size, np.nan)
                 for r in range(keep.size):
                     i0 = int(np.argmin(Lrc[r]))
-                    if i0 < 3 or i0 > offs.size - 4:
+                    if i0 < QUAD_HW or i0 > offs.size - QUAD_HW - 1:
                         continue
-                    xs, why = _quad(Lrc[r, i0 - 3: i0 + 4])
+                    xs, why = _quad(Lrc[r, i0 - QUAD_HW: i0 + QUAD_HW + 1])
                     t_ch[r] = tg + float(offs[i0]) + (xs if why == "ok" else 0.0)
                 fit = np.isfinite(t_ch)
                 if chdump is not None and fit.any():
@@ -234,10 +245,12 @@ def run_subtick_refine(ns, *, ckpt=None, truth_t0=None, half_ticks=3.0,
                 if chdump is not None:
                     sel = fit & (amp[keep] >= chan_min_amp)
                     if sel.sum() < min(chan_knn, int(fit.sum())):
-                        order_a = np.argsort(np.where(fit, amp[keep], -1))[::-1]
+                        pool = fit & (amp[keep] >= chan_amp_floor)
+                        order_a = np.argsort(np.where(pool, amp[keep], -1))[::-1]
+                        add = order_a[:chan_knn]
                         sel = np.zeros_like(fit)
-                        sel[order_a[:chan_knn]] = True
-                        sel &= fit
+                        sel[add] = True
+                        sel &= pool
                     fit = sel
                 if fit.sum() < 2:
                     continue
