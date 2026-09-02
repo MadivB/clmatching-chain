@@ -2219,7 +2219,7 @@ def main() -> int:
                                             f"{_ftag6}_ev{ev_id}.npz")
                     st6 = run_subtick_refine(
                         ns1, ckpt=args.light_ckpt, truth_t0=truth_t0,
-                        min_group_mev=3.0,
+                        min_group_mev=5.0,   # sub-5 MeV = light-blind (E_tiny): no refinable information
                         hit_refine=("channel6" if args.subtick_hit else None),
                         flow_path=file_path, dump_path=_dp6)
                     st6["time_s"] = round(time.time() - t_st6, 2)

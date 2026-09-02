@@ -108,7 +108,10 @@ def run_subtick_refine(ns, *, ckpt=None, truth_t0=None, half_ticks=3.0,
     _paths()
     from pulse_shapes import timeinterpolation
     from ML_NDfull_perceiver import process_clusters_to_imageMaps
+    import time as _time
+    _t0 = _time.time()
     model, template = _get_model(ckpt or DEFAULT_CKPT)
+    _t_load = _time.time() - _t0
     sipm_pos = build_sipm_positions(flow_path) if (hit_refine and flow_path) else {}
 
     ts = np.asarray(ns["hit_timestamps"], dtype=np.float64)
@@ -151,6 +154,7 @@ def run_subtick_refine(ns, *, ckpt=None, truth_t0=None, half_ticks=3.0,
     if not ginfo:
         return st
 
+    _t0 = _time.time()
     all_m = np.zeros(ts.size, bool)
     glab = np.full(ts.size, -1, np.int64)
     for gi, g in enumerate(ginfo):
@@ -166,6 +170,8 @@ def run_subtick_refine(ns, *, ckpt=None, truth_t0=None, half_ticks=3.0,
         g["sup"] = {c: np.flatnonzero(img.max(axis=1) > 1.0)
                     for c, img in g["imgs"].items()}
 
+    _t_render = _time.time() - _t0
+    _t0 = _time.time()
     total = np.zeros_like(actual)
     for g in ginfo:
         for c, img in g["imgs"].items():
@@ -216,6 +222,9 @@ def run_subtick_refine(ns, *, ckpt=None, truth_t0=None, half_ticks=3.0,
         dts.append(dt)
         st["n_refined"] += 1
     ts_groupE = ts.copy()
+    st["t_load"] = round(_t_load, 2)
+    st["t_render"] = round(_t_render, 2)
+    st["t_grid"] = round(_time.time() - _t0, 2)
 
     # ---- stage F: per-channel fits -> per-hit inverse-distance weighting ----
     chdump = [] if dump_path is not None else None
