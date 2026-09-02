@@ -753,6 +753,8 @@ def main() -> int:
             fs = run_first_stage_charge_light_matching(h5=h5, event_id=int(ev_id), config=cfg,
                                                        models=models, verbose=False)
             tim = {"first_stage": time.time() - t_ev}
+            stage1_t = {k: round(float(v), 2)
+                        for k, v in (getattr(fs, "timings", None) or {}).items()}
             labels_global = np.asarray(fs.clustering.labels_global)
             split_index = int(fs.clustering.split_index)
             label_info = fs.clustering.label_info
@@ -2441,6 +2443,7 @@ def main() -> int:
                 "t_evo": (t_evo if args.evo else None),
                 "prune": row_prune,
                 "shower_eat": se_row if args.shower_eat else None,
+                "stage1_t": stage1_t,
                 "t_event_s": time.time() - t_ev,
                 "sigma_mode": args.sigma_mode, "z_cut": Z, "trig_rows": trig_rows,
                 "stay_margin": float(args.stay_margin), "cos_sel": float(args.cos_sel), "cos_window": float(args.cos_window), "group_diags": group_diags,

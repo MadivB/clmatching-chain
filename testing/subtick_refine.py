@@ -73,6 +73,7 @@ def build_sipm_positions(flow_path):
     return _SIPM[flow_path]
 
 
+TOP_ROWS = 30        # brightest predicted channels used per group x TPC
 QUAD_HW = 4          # fit window half-width in 0.25-tick steps: 4 -> +-1 tick
 QUAD_GUARD = 0.75    # vertex acceptance [ticks] (user 2026-08-23: widen from
                      # the 2x2's 7-point/0.5 - the vertex sometimes lands out)
@@ -170,7 +171,12 @@ def run_subtick_refine(ns, *, ckpt=None, truth_t0=None, half_ticks=3.0,
         for c, img in g["imgs"].items():
             total[c] += timeinterpolation(img, shift=g["t"], baseline=0)
 
-    offs = np.arange(-half_ticks, half_ticks + 1e-9, step)
+    # single CENTERED window (user design 2026-08-24): the chain time is the
+    # full integer scan's argmin, so the sub-tick minimum is within a tick -
+    # no 25-point pre-scan needed. 2*QUAD_HW+1 shifts total (9 at hw=4, 7 at
+    # hw=3), quadratic fit directly on the window; vertex beyond the guard ->
+    # keep the chain time. Channels capped at the TOP_ROWS brightest.
+    offs = np.arange(-QUAD_HW, QUAD_HW + 1) * step
     group_id = np.full(ts.size, -1, np.int32)
 
     # ---- stage E: one time per group ----
@@ -183,21 +189,20 @@ def run_subtick_refine(ns, *, ckpt=None, truth_t0=None, half_ticks=3.0,
             ch = g["sup"][c]
             if not ch.size:
                 continue
+            if ch.size > TOP_ROWS:
+                amp_r = img[ch].max(axis=1)
+                ch = ch[np.argsort(amp_r)[::-1][:TOP_ROWS]]
             any_sup = True
-            own = timeinterpolation(img, shift=g["t"], baseline=0)
-            base = total[c][ch] - own[ch]
+            img_s = img[ch]
+            base = total[c][ch] - timeinterpolation(img_s, shift=g["t"], baseline=0)
             a_c, w_c = actual[c][ch], w_full[c][ch]
             for k, dt in enumerate(offs):
-                pred = np.minimum(base + timeinterpolation(img, shift=g["t"] + dt, baseline=0)[ch], CLIP)
+                pred = np.minimum(base + timeinterpolation(img_s, shift=g["t"] + dt, baseline=0), CLIP)
                 curve[k] += float((w_c * np.square(pred - a_c)).sum())
         g["t_new"] = g["t"]
         if not any_sup:
             continue
-        i0 = int(np.argmin(curve))
-        if i0 < QUAD_HW or i0 > offs.size - QUAD_HW - 1:
-            st["n_edge"] += 1
-            continue
-        xs, why, a_curv = _quad(curve[i0 - QUAD_HW: i0 + QUAD_HW + 1])
+        xs, why, a_curv = _quad(curve)
         if why == "nonconvex":
             st["n_nonconvex"] += 1
         elif why == "range":
@@ -205,7 +210,7 @@ def run_subtick_refine(ns, *, ckpt=None, truth_t0=None, half_ticks=3.0,
         # confidence foundation (v0.9): chi2(t) ~ min + a (t-t*)^2, so
         # delta-chi2 = 1 gives sigma_t = 1/sqrt(a) [ticks]
         g["sig_t"] = float(1.0 / np.sqrt(a_curv)) if a_curv > 0 else np.inf
-        dt = float(offs[i0] + xs)   # NO calibration (user: global bias is fine)
+        dt = float(xs)              # NO calibration (user: global bias is fine)
         g["t_new"] = g["t"] + dt
         ts[g["mask"]] = ts[g["mask"]] + dt
         dts.append(dt)
@@ -234,12 +239,12 @@ def run_subtick_refine(ns, *, ckpt=None, truth_t0=None, half_ticks=3.0,
                 if not keep.size:
                     continue
                 st["f_ch_dropped"] += int((amp > 1.0).sum() - keep.size)
-                own = timeinterpolation(img, shift=tg, baseline=0)
-                base = total[c][keep] - own[keep]
+                img_k = img[keep]
+                base = total[c][keep] - timeinterpolation(img_k, shift=tg, baseline=0)
                 a_c, w_c = actual[c][keep], w_full[c][keep]
                 Lrc = np.zeros((keep.size, offs.size))
                 for k, dt in enumerate(offs):
-                    pred = np.minimum(base + timeinterpolation(img, shift=tg + dt, baseline=0)[keep], CLIP)
+                    pred = np.minimum(base + timeinterpolation(img_k, shift=tg + dt, baseline=0), CLIP)
                     Lrc[:, k] = (w_c * np.square(pred - a_c)).sum(axis=1)
                 t_ch = np.full(keep.size, np.nan)
                 for r in range(keep.size):
