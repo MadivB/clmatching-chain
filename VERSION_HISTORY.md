@@ -23,6 +23,7 @@ coverage; **all-TPC** = every TPC. 126-event reference sample = files
 | v0.8.7 | 08-14 | 96.46 | 95.61 | support-restricted overflow gate (semantics fix) |
 | v0.8.8 | 08-14 | 96.49 | 95.64 | stage 5: LE blip re-timing (LE class 58.7→60.9) |
 | v0.8.9 | 08-23 | 96.50 | 95.65 | 895 t0 window + edge penalty (2x2-ported boundary-hiding guard) |
+| v0.9 | 09-02 | 96.50 | 95.65 | continuous t0s (--subtick): sum-mode stage E, sigma 9.2->8.6 ns, sigma_t confidence output; 61.8 s/ev/GPU |
 
 \* 39-event sample, pre length-gate fix — not comparable to later numbers.
 † file-0000001 same-node pair; 126-ev v0.8.6 row is the certified one.
