@@ -160,22 +160,50 @@ def run_subtick_refine(ns, *, ckpt=None, truth_t0=None, half_ticks=3.0,
     for gi, g in enumerate(ginfo):
         all_m |= g["mask"]
         glab[g["mask"]] = gi
-    imgs_all, _ = process_clusters_to_imageMaps(
-        x[all_m], y[all_m], z[all_m], e[all_m], tpc[all_m], glab[all_m],
-        model=model, template=template)          # ONE batched forward pass
+    # rank-1 render: the image is ALWAYS amp (x) template, so only the
+    # superposition-correct AMPLITUDES are needed - one voxelize+model
+    # pass, no (120,1000) materialization (was 16 s/ev)
+    from ML_NDfull_perceiver import group_voxelize_pairs, predict_phi
+    maps_4d, gcls, gtpcs = group_voxelize_pairs(
+        x[all_m], y[all_m], z[all_m], e[all_m], tpc[all_m], glab[all_m])
+    _t_vox = _time.time() - _t0
+    _t0 = _time.time()
+    amps = predict_phi(maps_4d, model, gtpcs, target_scale=1e-3,
+                       batch_size=32, raw_clip=(0.0, CLIP),
+                       min_prediction_threshold=100.0)
+    _t_model = _time.time() - _t0
+    _t0 = _time.time()
+    tmpl64 = np.asarray(template, np.float64)
     for gi, g in enumerate(ginfo):
-        g["imgs"] = {int(c): np.asarray(v, np.float64)
-                     for (l, c), v in imgs_all.items()
-                     if int(l) == gi and int(c) < n_light}
-        g["sup"] = {c: np.flatnonzero(img.max(axis=1) > 1.0)
-                    for c, img in g["imgs"].items()}
+        g["amp"] = {}
+        g["sup"] = {}
+    for gg, (l, c) in enumerate(zip(gcls, gtpcs)):
+        l, c = int(l), int(c)
+        if not (0 <= l < len(ginfo)) or not (0 <= c < n_light):
+            continue
+        a_vec = np.asarray(amps[gg], np.float64)
+        ginfo[l]["amp"][c] = a_vec
+        ginfo[l]["sup"][c] = np.flatnonzero(a_vec * tmpl64.max() > 1.0)
 
     _t_render = _time.time() - _t0
     _t0 = _time.time()
-    total = np.zeros_like(actual)
-    for g in ginfo:
-        for c, img in g["imgs"].items():
-            total[c] += timeinterpolation(img, shift=g["t"], baseline=0)
+
+    def _shift1(vec, sh):
+        return timeinterpolation(vec[None, :], shift=float(sh), baseline=0)[0]
+
+    tpc_groups = {}
+    for gi, g in enumerate(ginfo):
+        for c in g["amp"]:
+            tpc_groups.setdefault(c, []).append(gi)
+
+    def _field(c, rows, exclude_gi):
+        out = np.zeros((rows.size, n_ticks))
+        for gj in tpc_groups.get(c, []):
+            if gj == exclude_gi:
+                continue
+            gj_g = ginfo[gj]
+            out += gj_g["amp"][c][rows, None] * _shift1(tmpl64, gj_g["t"])[None, :]
+        return out
 
     # single CENTERED window (user design 2026-08-24): the chain time is the
     # full integer scan's argmin, so the sub-tick minimum is within a tick -
@@ -191,19 +219,18 @@ def run_subtick_refine(ns, *, ckpt=None, truth_t0=None, half_ticks=3.0,
         group_id[g["mask"]] = gi
         curve = np.zeros(offs.size)
         any_sup = False
-        for c, img in g["imgs"].items():
+        for c, a_vec in g["amp"].items():
             ch = g["sup"][c]
             if not ch.size:
                 continue
             if ch.size > TOP_ROWS:
-                amp_r = img[ch].max(axis=1)
-                ch = ch[np.argsort(amp_r)[::-1][:TOP_ROWS]]
+                ch = ch[np.argsort(a_vec[ch])[::-1][:TOP_ROWS]]
             any_sup = True
-            img_s = img[ch]
-            base = total[c][ch] - timeinterpolation(img_s, shift=g["t"], baseline=0)
+            base = _field(c, ch, gi)
             a_c, w_c = actual[c][ch], w_full[c][ch]
+            amp_col = a_vec[ch, None]
             for k, dt in enumerate(offs):
-                pred = np.minimum(base + timeinterpolation(img_s, shift=g["t"] + dt, baseline=0), CLIP)
+                pred = np.minimum(base + amp_col * _shift1(tmpl64, g["t"] + dt)[None, :], CLIP)
                 curve[k] += float((w_c * np.square(pred - a_c)).sum())
         g["t_new"] = g["t"]
         if not any_sup:
@@ -223,12 +250,18 @@ def run_subtick_refine(ns, *, ckpt=None, truth_t0=None, half_ticks=3.0,
         st["n_refined"] += 1
     ts_groupE = ts.copy()
     st["t_load"] = round(_t_load, 2)
+    st["t_vox"] = round(_t_vox, 2)
+    st["t_model"] = round(_t_model, 2)
     st["t_render"] = round(_t_render, 2)
     st["t_grid"] = round(_time.time() - _t0, 2)
 
     # ---- stage F: per-channel fits -> per-hit inverse-distance weighting ----
     chdump = [] if dump_path is not None else None
     if hit_refine:
+        raise NotImplementedError(
+            "stage F (per-hit) is parked on the git branch "
+            "intra-hit-development; the rank-1 stage-E rewrite on main "
+            "does not materialize the per-group images it needs")
         xyz = np.stack([x, y, z], 1)
         f_moves = []
         for gi_f, g in enumerate(ginfo):
