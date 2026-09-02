@@ -89,11 +89,11 @@ def _quad(L, hw=None, guard=None):
     b = float((x * L).sum()) / s2
     a = float(((x * x * L).sum() - (s2 / n) * L.sum())) / (s4 - s2 * s2 / n)
     if a <= 0:
-        return 0.0, "nonconvex"
+        return 0.0, "nonconvex", 0.0
     xs = -b / (2.0 * a)
     if abs(xs) > guard:
-        return 0.0, "range"
-    return float(xs), "ok"
+        return 0.0, "range", a
+    return float(xs), "ok", a
 
 
 def run_subtick_refine(ns, *, ckpt=None, truth_t0=None, half_ticks=3.0,
@@ -197,11 +197,14 @@ def run_subtick_refine(ns, *, ckpt=None, truth_t0=None, half_ticks=3.0,
         if i0 < QUAD_HW or i0 > offs.size - QUAD_HW - 1:
             st["n_edge"] += 1
             continue
-        xs, why = _quad(curve[i0 - QUAD_HW: i0 + QUAD_HW + 1])
+        xs, why, a_curv = _quad(curve[i0 - QUAD_HW: i0 + QUAD_HW + 1])
         if why == "nonconvex":
             st["n_nonconvex"] += 1
         elif why == "range":
             st["n_range"] += 1
+        # confidence foundation (v0.9): chi2(t) ~ min + a (t-t*)^2, so
+        # delta-chi2 = 1 gives sigma_t = 1/sqrt(a) [ticks]
+        g["sig_t"] = float(1.0 / np.sqrt(a_curv)) if a_curv > 0 else np.inf
         dt = float(offs[i0] + xs)   # NO calibration (user: global bias is fine)
         g["t_new"] = g["t"] + dt
         ts[g["mask"]] = ts[g["mask"]] + dt
@@ -243,7 +246,7 @@ def run_subtick_refine(ns, *, ckpt=None, truth_t0=None, half_ticks=3.0,
                     i0 = int(np.argmin(Lrc[r]))
                     if i0 < QUAD_HW or i0 > offs.size - QUAD_HW - 1:
                         continue
-                    xs, why = _quad(Lrc[r, i0 - QUAD_HW: i0 + QUAD_HW + 1])
+                    xs, why, _ac = _quad(Lrc[r, i0 - QUAD_HW: i0 + QUAD_HW + 1])
                     t_ch[r] = tg + float(offs[i0]) + (xs if why == "ok" else 0.0)
                 fit = np.isfinite(t_ch)
                 if chdump is not None and fit.any():
@@ -280,6 +283,19 @@ def run_subtick_refine(ns, *, ckpt=None, truth_t0=None, half_ticks=3.0,
             mv = np.concatenate(f_moves)
             st["f_dt_rms"] = round(float(np.sqrt(np.square(mv).mean())), 3)
 
+    hit_sigt = np.full(ts.size, np.nan, np.float32)
+    sigs = []
+    for g in ginfo:
+        sg = g.get("sig_t")
+        if sg is not None and np.isfinite(sg):
+            hit_sigt[g["mask"]] = np.float32(sg)
+            sigs.append(sg)
+    ns["hit_t0_sigma"] = hit_sigt          # ticks; NaN = no quadratic fit
+    if sigs:
+        q = np.percentile(sigs, [50, 90])
+        st["sigt_med_ns"] = round(float(q[0]) * 16.0, 2)
+        st["sigt_p90_ns"] = round(float(q[1]) * 16.0, 2)
+
     ns["hit_timestamps"] = ts
     if dts:
         d = np.abs(np.array(dts))
@@ -290,7 +306,7 @@ def run_subtick_refine(ns, *, ckpt=None, truth_t0=None, half_ticks=3.0,
             dump_path, ts_before=ts_before.astype(np.float32),
             ts_groupE=ts_groupE.astype(np.float32),
             ts_after=ts.astype(np.float32), e=e.astype(np.float32),
-            group_id=group_id,
+            group_id=group_id, hit_sigt=hit_sigt,
             ch_gi=np.array([t[0] for t in chdump or []], np.int32),
             ch_tpc=np.array([t[1] for t in chdump or []], np.int32),
             ch_tg=np.array([t[2] for t in chdump or []], np.float32),
