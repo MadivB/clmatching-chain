@@ -100,7 +100,12 @@ def _quad(L, hw=None, guard=None):
 def run_subtick_refine(ns, *, ckpt=None, truth_t0=None, half_ticks=3.0,
                        step=0.25, group_merge=0.5, min_group_mev=0.0,
                        hit_refine=None, flow_path=None, chan_min_amp=400.0,
-                       chan_amp_floor=300.0, chan_knn=12, dump_path=None):
+                       chan_amp_floor=300.0, chan_knn=12, amp_mode="sum",
+                       dump_path=None):
+    # amp_mode "sum" (default, user 2026-09-02: slight precision loss
+    # accepted for speed): group amplitude = sum of the members' stage-1
+    # per-cluster amplitudes on support channels - no re-voxelize/model.
+    # "model": collective re-render (superposition-exact, +~17 s/ev).
     # chan_knn=12 + 1/d^2: best of the 60-config offline sweep (2026-08-23,
     # file 1): per-hit sigma 7.79 ns, mechanism corr 0.346. The sweep is
     # FLAT (corr 0.25-0.35 everywhere) - ND's per-channel information
@@ -160,30 +165,51 @@ def run_subtick_refine(ns, *, ckpt=None, truth_t0=None, half_ticks=3.0,
     for gi, g in enumerate(ginfo):
         all_m |= g["mask"]
         glab[g["mask"]] = gi
-    # rank-1 render: the image is ALWAYS amp (x) template, so only the
-    # superposition-correct AMPLITUDES are needed - one voxelize+model
-    # pass, no (120,1000) materialization (was 16 s/ev)
-    from ML_NDfull_perceiver import group_voxelize_pairs, predict_phi
-    maps_4d, gcls, gtpcs = group_voxelize_pairs(
-        x[all_m], y[all_m], z[all_m], e[all_m], tpc[all_m], glab[all_m])
-    _t_vox = _time.time() - _t0
-    _t0 = _time.time()
-    amps = predict_phi(maps_4d, model, gtpcs, target_scale=1e-3,
-                       batch_size=32, raw_clip=(0.0, CLIP),
-                       min_prediction_threshold=100.0)
-    _t_model = _time.time() - _t0
-    _t0 = _time.time()
     tmpl64 = np.asarray(template, np.float64)
+    _t_vox = _t_model = 0.0
     for gi, g in enumerate(ginfo):
         g["amp"] = {}
         g["sup"] = {}
-    for gg, (l, c) in enumerate(zip(gcls, gtpcs)):
-        l, c = int(l), int(c)
-        if not (0 <= l < len(ginfo)) or not (0 <= c < n_light):
-            continue
-        a_vec = np.asarray(amps[gg], np.float64)
-        ginfo[l]["amp"][c] = a_vec
-        ginfo[l]["sup"][c] = np.flatnonzero(a_vec * tmpl64.max() > 1.0)
+    if amp_mode == "model":
+        # rank-1 collective render: superposition-correct amplitudes from
+        # one voxelize+model pass, no (120,1000) materialization
+        from ML_NDfull_perceiver import group_voxelize_pairs, predict_phi
+        maps_4d, gcls, gtpcs = group_voxelize_pairs(
+            x[all_m], y[all_m], z[all_m], e[all_m], tpc[all_m], glab[all_m])
+        _t_vox = _time.time() - _t0
+        _t0 = _time.time()
+        amps = predict_phi(maps_4d, model, gtpcs, target_scale=1e-3,
+                           batch_size=32, raw_clip=(0.0, CLIP),
+                           min_prediction_threshold=100.0)
+        _t_model = _time.time() - _t0
+        _t0 = _time.time()
+        for gg, (l, c) in enumerate(zip(gcls, gtpcs)):
+            l, c = int(l), int(c)
+            if not (0 <= l < len(ginfo)) or not (0 <= c < n_light):
+                continue
+            a_vec = np.asarray(amps[gg], np.float64)
+            ginfo[l]["amp"][c] = a_vec
+            ginfo[l]["sup"][c] = np.flatnonzero(a_vec * tmpl64.max() > 1.0)
+    else:
+        # sum of the members' existing stage-1 amplitudes (img = amp x tmpl)
+        image_maps = ns["imageMaps"]
+        labs_g = np.asarray(ns["labels_global"])
+        tmpl_max = float(tmpl64.max())
+        by_label = {}
+        for (lab, c), im in image_maps.items():
+            by_label.setdefault(int(lab), []).append((int(c), im))
+        for gi, g in enumerate(ginfo):
+            for lab in np.unique(labs_g[g["mask"]]):
+                for c, im in by_label.get(int(lab), []):
+                    if not (0 <= c < n_light):
+                        continue
+                    a_vec = np.asarray(im, np.float64).max(axis=1) / tmpl_max
+                    if c in g["amp"]:
+                        g["amp"][c] += a_vec
+                    else:
+                        g["amp"][c] = a_vec
+            for c, a_vec in g["amp"].items():
+                g["sup"][c] = np.flatnonzero(a_vec * tmpl_max > 1.0)
 
     _t_render = _time.time() - _t0
     _t0 = _time.time()
