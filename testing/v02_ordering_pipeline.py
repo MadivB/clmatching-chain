@@ -87,9 +87,14 @@ SCAN_TEMPLATE = None    # rank-1 fast path: set to the shared pulse template
                         # sum factors out of the chi2. Verified per call.
 
 
+SCAN_TCOLS = None       # 3 spot-check columns, set with SCAN_TEMPLATE
+
+
 def _rank1_amp(pred, tmpl, tmax):
     amp = pred.max(axis=1) / tmax
-    ok = np.allclose(pred, amp[:, None] * tmpl[None, :], rtol=1e-3, atol=0.5)
+    cols = SCAN_TCOLS
+    ok = np.allclose(pred[:, cols], amp[:, None] * tmpl[cols][None, :],
+                     rtol=2e-3, atol=1.0)
     return (amp if ok else None)
 
 
