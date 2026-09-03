@@ -449,6 +449,11 @@ def main() -> int:
                     help="EXPERIMENTAL (parked on git branch "
                          "intra-hit-development; NOT part of v1): stage F "
                          "per-HIT t0s from per-channel fits (implies --subtick)")
+    ap.add_argument("--conf-cluster", action="store_true",
+                    help="v0.9.3: calibrated cluster-level confidence "
+                         "(3 evidence families, HGB+isotonic); needs --subtick")
+    ap.add_argument("--conf-model", default="",
+                    help="override path to subtick_conf_model3.joblib")
     ap.add_argument("--subtick-dump", default="",
                     help="dir for per-hit (ts_before, ts_after, truth, e) "
                          "npz dumps from the subtick stage")
@@ -2280,6 +2285,27 @@ def main() -> int:
                         flow_path=file_path, dump_path=_dp6)
                     st6["time_s"] = round(time.time() - t_st6, 2)
                     p3_row["subtick"] = st6
+                    if args.conf_cluster:
+                        # v0.9.3 cluster-level calibrated confidence
+                        t_c93 = time.time()
+                        try:
+                            from conf_v093 import score_event as _c93
+                            _lab_c, _hit_c93, st93 = _c93(
+                                x=fs.event.x, y=fs.event.y, z=fs.event.z,
+                                e=fs.event.energy, tpc=hit_tpc,
+                                labels=labels_global,
+                                ts_final=np.asarray(ns1["hit_timestamps"],
+                                                    np.float64),
+                                actual=actual, base_image=ns1["baseImage"],
+                                veto_mask=veto_mask, image_maps=image_maps,
+                                ns=ns1, n_light=n_light,
+                                model_path=(args.conf_model or None))
+                            ns1["hit_t0_conf_group"] = ns1.get("hit_t0_conf")
+                            ns1["hit_t0_conf"] = _hit_c93
+                            st93["time_s"] = round(time.time() - t_c93, 2)
+                            p3_row["conf93"] = st93
+                        except Exception as _c93e:
+                            p3_row["conf93"] = {"error": repr(_c93e)}
                 if args.shower_tpc:
                     if _HERE not in sys.path:
                         sys.path.insert(0, _HERE)
@@ -2436,6 +2462,27 @@ def main() -> int:
                          for k, v in _cconf.items()})
                 except Exception as _cce:
                     extra["cluster_conf"] = json.dumps({"error": repr(_cce)})
+                if args.conf_cluster and ns1.get("hit_t0_conf") is not None:
+                    extra["hit_conf93"] = np.asarray(ns1["hit_t0_conf"],
+                                                     np.float32)
+                # v0.9.3 confidence dev: per-label per-channel PEAK vectors
+                # (rank-1 identity: predicted image = amp x shared template, so
+                # peak-per-channel fully describes each label's light) — lets
+                # scan-curve / margin features be developed offline.
+                try:
+                    _al, _at, _ar = [], [], []
+                    for (_lab, _c), _im in image_maps.items():
+                        if not (0 <= int(_c) < n_light):
+                            continue
+                        _al.append(int(_lab))
+                        _at.append(int(_c))
+                        _ar.append(np.asarray(_im, np.float32).max(axis=1))
+                    extra["amp_lab"] = np.asarray(_al, np.int32)
+                    extra["amp_tpc"] = np.asarray(_at, np.int32)
+                    extra["amp_row"] = (np.asarray(_ar, np.float32)
+                                        if _ar else np.zeros((0, 120), np.float32))
+                except Exception as _ame:
+                    extra["amp_err"] = repr(_ame)
                 ftag = os.path.basename(file_path).split(".")[-3]
                 np.savez_compressed(
                     os.path.join(args.dump_dir, f"{ftag}_ev{ev_id}.npz"),

@@ -18,7 +18,7 @@ V09="--backbone stack2 --merge-p2 --sigma-mode poisson --max-clip-ticks 4 \
 --police locked --merge-vertex --skip-baseline --phase3 joint --pass2-trade \
 --pass2-light-nom --force-coverage --swap-fix --swap-ratio-max 0.85 \
 --p2-threshold 30 --predict-min-energy 1.5 --skip-v2 --gate-support \
---le-retime --edge-penalty --subtick \
+--le-retime --edge-penalty --subtick --conf-cluster \
 --light-ckpt $SMALL --frontend-repo $FRONTEND"
 
 mkdir -p "$OUT"

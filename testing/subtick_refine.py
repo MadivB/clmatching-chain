@@ -439,6 +439,14 @@ def run_subtick_refine(ns, *, ckpt=None, truth_t0=None, half_ticks=3.0,
         st["conf_med"] = round(float(np.median(p)), 3)
         st["conf_frac_lo"] = round(float(np.mean(p < 0.5)), 3)
     ns["hit_t0_conf"] = hit_conf          # 0=likely wrong, 1=confident; NaN=no estimate
+    # v0.9.3: stash the group evidence + pre-stage-E integer times for the
+    # downstream cluster-level confidence (conf_v093.score_event)
+    ns["subtick_group"] = (np.asarray(conf_feat, np.float64)
+                           if conf_feat else np.zeros((0, 10)),
+                           np.asarray(conf_meta, np.float64)
+                           if conf_meta else np.zeros((0, 4)),
+                           group_id)
+    ns["ts_before_subtick"] = ts_before.astype(np.float64)
 
     hit_sigt = np.full(ts.size, np.nan, np.float32)
     sigs = []
