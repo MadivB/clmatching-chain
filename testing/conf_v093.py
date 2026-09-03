@@ -25,7 +25,7 @@ sys.path.insert(0, HERE)
 
 from scan_margin import event_scan_feats, SCAN_NAMES
 
-DEFAULT_RULE = os.path.join(HERE, "conf_rule_v0101.json")
+DEFAULT_RULE = os.path.join(HERE, "conf_rule_v0102.json")
 _RULE = None
 _MODEL = None
 
@@ -34,8 +34,10 @@ def _get_rule(path):
     global _RULE
     if _RULE is None:
         _RULE = json.load(open(path))
-        for c in _RULE["checks"]:
+        for c in _RULE.get("checks", []) + _RULE.get("penalties", []):
             c["idx"] = SCAN_NAMES.index(c["feature"])
+        if "backbone" in _RULE:
+            _RULE["backbone_idx"] = SCAN_NAMES.index(_RULE["backbone"])
     return _RULE
 
 
@@ -91,11 +93,42 @@ def score_event(x, y, z, e, tpc, labels, ts_final, actual, base_image,
                          ns, sfeats, model_path)
 
     rule = _get_rule(DEFAULT_RULE)
-    purity = {int(k): float(v) for k, v in rule["level_purity_E"].items()}
     n_scan = 0
-    levels = []
     all_labs = np.unique(labels[(labels >= 0)])
     fin = np.isfinite(ts) & (ts >= 0)
+    if rule.get("mode") == "product":
+        # v0.10.2 user design: conf = pcu_vote10 * penalty factors
+        for L in all_labs:
+            L = int(L)
+            if not (fin & (labels == L)).any():
+                continue
+            sf = sfeats.get(L)
+            if sf is None:
+                # light-blind: fixed measured-prior value, no calibration
+                conf = float(rule.get("no_scan_conf", 0.5))
+                lab_conf[L] = conf
+                hit_conf[labels == L] = np.float32(conf)
+                continue
+            if True:
+                n_scan += 1
+                conf = float(sf[0][rule["backbone_idx"]])
+                for c in rule["penalties"]:
+                    if float(sf[0][c["idx"]]) < c["below"]:
+                        conf *= c["factor"]
+            cal = rule.get("calibration")
+            if cal is not None:
+                conf = float(np.interp(conf, cal["knots"], cal["values"]))
+            lab_conf[L] = conf
+            hit_conf[labels == L] = np.float32(conf)
+        stats = {"n_clusters": len(lab_conf), "n_with_scan": n_scan,
+                 "mode": "product"}
+        if lab_conf:
+            vals = np.array(list(lab_conf.values()))
+            stats["conf_med"] = round(float(np.median(vals)), 3)
+            stats["conf_frac_lo"] = round(float((vals < 0.25).mean()), 3)
+        return lab_conf, hit_conf, stats
+    purity = {int(k): float(v) for k, v in rule["level_purity_E"].items()}
+    levels = []
     for L in all_labs:
         L = int(L)
         if not (fin & (labels == L)).any():

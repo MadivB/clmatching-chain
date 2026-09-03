@@ -1,0 +1,46 @@
+{
+ "mode": "product",
+ "backbone": "pcu_vote10",
+ "penalties": [
+  {
+   "feature": "c_cosres",
+   "below": 0.71,
+   "factor": 0.5,
+   "why": "side-help: residual pattern clearly unlike own light (fires 26%)"
+  },
+  {
+   "feature": "rel_margin",
+   "below": 0.56,
+   "factor": 0.5,
+   "why": "side-help: competitor valley clearly comparable (fires 30%)"
+  }
+ ],
+ "calibration": {
+  "knots": [
+   0.025,
+   0.1,
+   0.225,
+   0.4,
+   0.6,
+   0.775,
+   0.9,
+   0.975
+  ],
+  "values": [
+   0.3,
+   0.553,
+   0.74,
+   0.86,
+   0.929,
+   0.975,
+   0.996,
+   0.997
+  ],
+  "how": "delivered conf = linear interp of raw product score through the measured E-weighted bin purity (file 0000001); monotone, ordering preserved"
+ },
+ "no_scan_conf": 0.59,
+ "tuned_on": "file 0000001 (13 events), 2026-09-04 (lean side-help redesign)",
+ "auc_Ewt": 0.926,
+ "auc_count": 0.795,
+ "note": "user design 2026-09-04: pcu_vote10 backbone; penalties are SIDE-HELP (low thresholds, fire only when clearly bad); pcu_sig_med dropped (redundant with vote10 - flat channels produce scattered votes); correct clusters: median conf 0.74, only 9% below 0.1"
+}
