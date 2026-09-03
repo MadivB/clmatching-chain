@@ -73,10 +73,17 @@ def score_event(x, y, z, e, tpc, labels, ts_final, actual, base_image,
         if m.any():
             v, c = np.unique(np.round(ts_bef[m]).astype(int), return_counts=True)
             lab_t0[int(L)] = int(v[np.argmax(c)])
-    sfeats = event_scan_feats(base, act, veto_mask, al, at, ar, lab_t0)
+    try:
+        import torch
+        _gpu = torch.cuda.is_available()
+    except Exception:
+        _gpu = False
+    sfeats = event_scan_feats(base, act, veto_mask, al, at, ar, lab_t0,
+                              use_gpu=_gpu)
 
     rows, labs_scored = [], []
     n_scan = 0
+    n_sf = len(mdl.get("scan_feats", [])) or 8
     for r in crows:
         l = int(r["label"])
         m = labels == l
@@ -88,13 +95,19 @@ def score_event(x, y, z, e, tpc, labels, ts_final, actual, base_image,
         X = np.nan_to_num(np.asarray(r["x"], np.float64), nan=0.0)
         G = np.nan_to_num(np.asarray(grow, np.float64) if grow is not None
                           else np.full(10, np.nan), nan=0.0)
-        S = np.zeros(9)
+        S = np.zeros(n_sf + 1)
         sf = sfeats.get(l)
         if sf is not None:
-            S[:-1] = np.nan_to_num(sf[0], nan=0.0, posinf=1e9, neginf=-1e9)
+            S[:-1] = np.nan_to_num(sf[0][:n_sf], nan=0.0,
+                                   posinf=1e9, neginf=-1e9)
             S[-1] = 1.0
             n_scan += 1
-        rows.append(np.concatenate([X, G, S]))
+        if mdl.get("scan_only"):
+            rows.append(S)
+        elif mdl.get("no_group"):
+            rows.append(np.concatenate([X, S]))
+        else:
+            rows.append(np.concatenate([X, G, S]))
         labs_scored.append(l)
 
     lab_conf = {}
