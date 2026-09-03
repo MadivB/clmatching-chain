@@ -1,0 +1,33 @@
+{
+ "checks": [
+  {
+   "feature": "rel_margin",
+   "op": ">=",
+   "threshold": 0.8261711438997111
+  },
+  {
+   "feature": "pcu_vote10",
+   "op": ">=",
+   "threshold": 0.459516110426896
+  },
+  {
+   "feature": "pcu_sig_med",
+   "op": ">=",
+   "threshold": 10.859664578109115
+  },
+  {
+   "feature": "c_cosres",
+   "op": ">=",
+   "threshold": 0.9697557012020808
+  }
+ ],
+ "level_purity_E": {
+  "0": 0.4904,
+  "1": 0.7239,
+  "2": 0.909,
+  "3": 0.9904,
+  "4": 0.9999
+ },
+ "tuned_on": "file 0000001 (13 events), 2026-09-03",
+ "auc_Ewt": 0.9614
+}
