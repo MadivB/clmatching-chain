@@ -34,6 +34,16 @@ GAIN, CLIP = 200.0, 60780.0
 S2, S4 = 1.75, 0.765625          # sums over x in {-0.75..0.75} step 0.25
 _MODEL = {}
 _SIPM = {}
+_CONF = {}
+
+
+def _get_conf_model():
+    if "m" not in _CONF:
+        import json as _json
+        p = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                         "subtick_conf_model.json")
+        _CONF["m"] = _json.load(open(p)) if os.path.exists(p) else None
+    return _CONF["m"]
 
 
 def _paths():
@@ -262,6 +272,10 @@ def run_subtick_refine(ns, *, ckpt=None, truth_t0=None, half_ticks=3.0,
         if not any_sup:
             continue
         xs, why, a_curv = _quad(curve)
+        g["curve_min"] = float(curve.min())
+        g["curve_contrast"] = float((curve.max() - curve.min()) / max(abs(curve.min()), 1.0))
+        g["fit_status"] = {"ok": 0.0, "range": 1.0, "nonconvex": 2.0}[why]
+        g["n_rows_fit"] = float(sum(min(len(g["sup"][c]), TOP_ROWS) for c in g["amp"]))
         if why == "nonconvex":
             st["n_nonconvex"] += 1
         elif why == "range":
@@ -356,6 +370,76 @@ def run_subtick_refine(ns, *, ckpt=None, truth_t0=None, half_ticks=3.0,
             mv = np.concatenate(f_moves)
             st["f_dt_rms"] = round(float(np.sqrt(np.square(mv).mean())), 3)
 
+    # ---- confidence features (v0.9.2 study): waveform comparison at the
+    # final time + quadratic-fit evidence, one row per group ----
+    tmax_i = int(np.argmax(tmpl64))
+    tmpl_pk = float(tmpl64.max())
+    conf_feat, conf_meta = [], []
+    for gi, g in enumerate(ginfo):
+        if not g["amp"]:
+            continue
+        k0 = int(round(g["t_new"])) + tmax_i
+        zs, amps_v, resid_v = [], [], []
+        for c, a_vec in g["amp"].items():
+            ch = g["sup"][c]
+            if not ch.size or not (0 <= k0 < n_ticks):
+                continue
+            if ch.size > TOP_ROWS:
+                ch = ch[np.argsort(a_vec[ch])[::-1][:TOP_ROWS]]
+            own_pk = a_vec[ch] * tmpl_pk
+            base_pk = _field(c, ch, gi)[:, k0]
+            a_pk = actual[c][ch, k0]
+            model = np.minimum(base_pk + own_pk, CLIP)
+            zs.append((model - a_pk) / np.sqrt(GAIN * np.maximum(a_pk, 100.0)))
+            amps_v.append(own_pk)
+            resid_v.append(np.clip(a_pk - base_pk, 0.0, None))
+        if not zs:
+            continue
+        z = np.concatenate(zs)
+        av = np.concatenate(amps_v)
+        rv = np.concatenate(resid_v)
+        na, nr = float(np.linalg.norm(av)), float(np.linalg.norm(rv))
+        cosr = float(av @ rv / (na * nr)) if na > 1e-9 and nr > 1e-9 else 0.0
+        mhits = g["mask"]
+        conf_feat.append([
+            np.log10(max(g["e"], 1e-3)),
+            min(g.get("sig_t", np.inf), 10.0),
+            g.get("fit_status", 2.0),
+            g["curve_min"] / max(g["n_rows_fit"] * n_ticks, 1.0),
+            g["curve_contrast"],
+            float(np.mean(np.abs(z))),
+            float(np.mean(np.abs(z) > 2.0)),
+            cosr,
+            float(len(g["amp"])),
+            np.log10(max(int(mhits.sum()), 1)),
+        ])
+        ok_e = wrong_e = 0.0
+        if truth_t0 is not None:
+            tr = np.asarray(truth_t0, np.float64)[mhits]
+            ee = e[mhits]
+            fin = np.isfinite(tr)
+            ok_e = float(ee[fin & (np.abs(ts[mhits] - tr) <= 10.0)].sum())
+            wrong_e = float(ee[fin].sum()) - ok_e
+        conf_meta.append([gi, g["e"], ok_e, wrong_e])
+
+    # calibrated 0-1 confidence (v0.9.2): logistic on both evidence
+    # families, trained/calibrated on file 0000001 LOO (AUC 0.881;
+    # reliability monotone 22% -> 99.8%); see subtick_conf_study.py
+    hit_conf = np.full(ts.size, np.nan, np.float32)
+    cmdl = _get_conf_model()
+    if cmdl is not None and conf_feat:
+        F = np.asarray(conf_feat, np.float64)[:, cmdl["cols"]]
+        Z = (F - np.asarray(cmdl["mu"])[cmdl["cols"]]) / np.asarray(cmdl["sd"])[cmdl["cols"]]
+        wv = np.asarray(cmdl["w"])
+        p = 1.0 / (1.0 + np.exp(-(Z @ wv + cmdl["b"])))
+        for row, meta in enumerate(conf_meta):
+            gi = int(meta[0])
+            ginfo[gi]["conf"] = float(p[row])
+            hit_conf[ginfo[gi]["mask"]] = np.float32(p[row])
+        st["conf_med"] = round(float(np.median(p)), 3)
+        st["conf_frac_lo"] = round(float(np.mean(p < 0.5)), 3)
+    ns["hit_t0_conf"] = hit_conf          # 0=likely wrong, 1=confident; NaN=no estimate
+
     hit_sigt = np.full(ts.size, np.nan, np.float32)
     sigs = []
     for g in ginfo:
@@ -380,6 +464,9 @@ def run_subtick_refine(ns, *, ckpt=None, truth_t0=None, half_ticks=3.0,
             ts_groupE=ts_groupE.astype(np.float32),
             ts_after=ts.astype(np.float32), e=e.astype(np.float32),
             group_id=group_id, hit_sigt=hit_sigt,
+            hit_conf=hit_conf,
+            conf_feat=np.asarray(conf_feat, np.float32),
+            conf_meta=np.asarray(conf_meta, np.float32),
             ch_gi=np.array([t[0] for t in chdump or []], np.int32),
             ch_tpc=np.array([t[1] for t in chdump or []], np.int32),
             ch_tg=np.array([t[2] for t in chdump or []], np.float32),
