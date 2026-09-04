@@ -80,35 +80,56 @@ SCAN_TEMPLATE = None    # rank-1 fast path: set to the shared pulse template
 SCAN_TCOLS = None       # 3 spot-check columns, set with SCAN_TEMPLATE
 
 
+FS_STAT = np.zeros(4, np.int64)   # calls, full-fast, split, rows_bad
+
+
 def _rank1_amp(pred, tmpl, tmax):
+    """Per-ROW rank-1 check (clipped rows are flat-topped and fail; they get
+    the generic path while conforming rows take the collapsed path)."""
     amp = pred.max(axis=1) / tmax
     cols = SCAN_TCOLS
-    ok = np.allclose(pred[:, cols], amp[:, None] * tmpl[cols][None, :],
-                     rtol=2e-3, atol=1.0)
-    return (amp if ok else None)
+    exp = amp[:, None] * tmpl[cols][None, :]
+    ok_rows = np.all(np.abs(pred[:, cols] - exp) <= 1.0 + 2e-3 * np.abs(exp),
+                     axis=1)
+    return amp, ok_rows
 
 
 def weighted_scan(pred, resid, w, max_shift=SEARCH):
     n = pred.shape[1]
     if SCAN_TEMPLATE is not None and pred.shape[1] == SCAN_TEMPLATE.size:
         tmpl = SCAN_TEMPLATE
-        amp = _rank1_amp(np.asarray(pred, np.float64), tmpl, float(tmpl.max()))
-        if amp is not None:
-            w2 = (w * np.square(amp)[:, None]).sum(axis=0)[None, :]
-            wr = (w * resid * amp[:, None]).sum(axis=0)[None, :]
+        predf = np.asarray(pred, np.float64)
+        amp, ok_rows = _rank1_amp(predf, tmpl, float(tmpl.max()))
+        FS_STAT[0] += 1
+        FS_STAT[3] += int((~ok_rows).sum())
+        if ok_rows.all():
+            FS_STAT[1] += 1
+        else:
+            FS_STAT[2] += 1
+        if ok_rows.any():
+            wo, ro, ao = w[ok_rows], resid[ok_rows], amp[ok_rows]
+            w2 = (wo * np.square(ao)[:, None]).sum(axis=0)[None, :]
+            wr = (wo * ro * ao[:, None]).sum(axis=0)[None, :]
             t1 = fftconvolve(w2, np.square(tmpl)[None, ::-1], mode="full", axes=1)[0, n - 1: n - 1 + max_shift + 1]
             t2 = fftconvolve(wr, tmpl[None, ::-1], mode="full", axes=1)[0, n - 1: n - 1 + max_shift + 1]
-            out = t1 + 2.0 * t2 + float(np.sum(w * resid * resid))
+            out = t1 + 2.0 * t2 + float(np.sum(wo * ro * ro))
             if EDGE_PENALTY:
-                wt = w[:, -EDGE_TAIL_TICKS:].mean(axis=1)
+                wt = wo[:, -EDGE_TAIL_TICKS:].mean(axis=1)
                 suf = np.cumsum(np.square(tmpl)[::-1])[::-1]
-                A = float((wt * np.square(amp)).sum()) * suf
+                A = float((wt * np.square(ao)).sum()) * suf
                 pen = np.zeros(max_shift + 1)
                 sh = np.arange(1, max_shift + 1)
                 idx = n - sh
                 m = (idx >= 0) & (idx < n)
                 pen[1:][m] = A[idx[m]]
                 out = out + pen
+            if not ok_rows.all():
+                pb, rb, wb = predf[~ok_rows], resid[~ok_rows], w[~ok_rows]
+                t1b = fftconvolve(wb, (pb * pb)[:, ::-1], mode="full", axes=1)[:, n - 1: n - 1 + max_shift + 1].sum(axis=0)
+                t2b = fftconvolve(wb * rb, pb[:, ::-1], mode="full", axes=1)[:, n - 1: n - 1 + max_shift + 1].sum(axis=0)
+                out = out + t1b + 2.0 * t2b + float(np.sum(wb * rb * rb))
+                if EDGE_PENALTY:
+                    out = out + _edge_penalty_vec(pb, wb, max_shift)
             return out
     t1 = fftconvolve(w, (pred * pred)[:, ::-1], mode="full", axes=1)[:, n - 1: n - 1 + max_shift + 1].sum(axis=0)
     t2 = fftconvolve(w * resid, pred[:, ::-1], mode="full", axes=1)[:, n - 1: n - 1 + max_shift + 1].sum(axis=0)
