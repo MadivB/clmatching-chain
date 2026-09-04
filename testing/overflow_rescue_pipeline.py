@@ -602,6 +602,12 @@ def main() -> int:
                          "delta-chi2 only (regular pipeline loss; default since "
                          "2026-07-15 A/B tie), special = per-MeV delta-chi2 + "
                          "geodesic term (legacy v0.3.0)")
+    ap.add_argument("--force-simple", action="store_true",
+                    help="v0.10.6: KD-tree force coverage (nearest assigned "
+                         "hit; no geodesics/ML) instead of force_full_coverage")
+    ap.add_argument("--isolate-cm", type=float, default=0.0,
+                    help="hits with no other hit within this distance get NO "
+                         "t0 (NaN) at any stage (0 = off)")
     ap.add_argument("--force-coverage", action="store_true",
                     help="final stage: force-assign EVERYTHING left (imaged leftovers "
                          "at best of family-t0 vs own scan minimum even if loss "
@@ -2209,9 +2215,14 @@ def main() -> int:
                     if _HERE not in sys.path:
                         sys.path.insert(0, _HERE)
                     from v030_expansion import force_full_coverage
+                    from force_simple import force_simple_coverage
                     ts_pf = np.asarray(ns1["hit_timestamps"], dtype=np.float64)
                     A_pref = np.isfinite(ts_pf) & (ts_pf >= 0)
-                    st_f = force_full_coverage(ns1, verbose=False)
+                    if args.force_simple:
+                        st_f = force_simple_coverage(
+                            ns1, isolate_cm=float(args.isolate_cm))
+                    else:
+                        st_f = force_full_coverage(ns1, verbose=False)
                     ts_af = np.asarray(ns1["hit_timestamps"], dtype=np.float64)
                     newf = np.isfinite(ts_af) & (ts_af >= 0) & ~A_pref
                     st_f["force_acc_new"], _ = accuracy(ts_af, truth_t0, e_pos, mask=newf)
