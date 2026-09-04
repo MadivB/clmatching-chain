@@ -1,0 +1,14 @@
+{
+ "mode": "formula",
+ "formula": "conf = pcu_vote10 * rel_margin / (1 + rel_margin)",
+ "vars": [
+  "pcu_vote10",
+  "rel_margin"
+ ],
+ "no_scan": "NaN (no estimate - light-blind cluster)",
+ "mc_truth_use": "NONE in the score. MC used only for validation. Reading key (file 0000001): conf>=0.9 -> 99.8% E-pure (75.8% of E); 0.7-0.9 -> 98.6%; 0.5-0.7 -> 94.4%; 0.3-0.5 -> 87.0%; 0.1-0.3 -> 68.8%; <0.1 -> 49.0%",
+ "interpretation": "witness agreement (fraction of light channels whose own loss minimum is within +-10 ticks of the placement, amplitude-weighted) x two-hypothesis posterior that the chosen valley beats its best rival (odds = rel_margin; 0.5 at rm=1, ->1 as the rival vanishes)",
+ "auc_Ewt": 0.955,
+ "auc_count": 0.807,
+ "designed": "user 2026-09-04: two variables only, minimal MC truth"
+}

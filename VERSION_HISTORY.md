@@ -28,6 +28,7 @@ coverage; **all-TPC** = every TPC. 126-event reference sample = files
 | v0.10.0 | 09-02 | 96.50 | 95.65 | cluster-level 3-family confidence (--conf-cluster): spatial 40f + group 10f + scan-landscape 8f, HGB+isotonic, LOO-AUC 0.850 (0.970 E-wt); +4.2 s/ev median |
 | v0.10.1 | 09-03 | 96.50 | 95.65 | confidence goes RULE-BASED (4 JSON thresholds on scan-landscape: rel_margin/pcu_vote10/pcu_sig_med/c_cosres, 5-level purity lookup): E-wt AUC 0.961, 0.78 s/ev, no ML in data path |
 | v0.10.2 | 09-04 | 96.50 | 95.65 | lean product confidence (user design): pcu_vote10 x 2 side-help penalties + 8-knot purity calibration; correct median 0.88 (none <0.3), E-wt AUC 0.933, 0.71 s/ev |
+| v0.10.3 | 09-04 | 96.50 | 95.65 | ZERO-MC confidence: conf = pcu_vote10 x rel_margin/(1+rel_margin) (witness agreement x rival-defeat posterior, no tuned numbers); E-wt AUC 0.955, 0.74 s/ev |
 
 \* 39-event sample, pre length-gate fix — not comparable to later numbers.
 † file-0000001 same-node pair; 126-ev v0.8.6 row is the certified one.

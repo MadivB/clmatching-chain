@@ -25,7 +25,7 @@ sys.path.insert(0, HERE)
 
 from scan_margin import event_scan_feats, SCAN_NAMES
 
-DEFAULT_RULE = os.path.join(HERE, "conf_rule_v0102.json")
+DEFAULT_RULE = os.path.join(HERE, "conf_rule_v0103.json")
 _RULE = None
 _MODEL = None
 
@@ -38,6 +38,8 @@ def _get_rule(path):
             c["idx"] = SCAN_NAMES.index(c["feature"])
         if "backbone" in _RULE:
             _RULE["backbone_idx"] = SCAN_NAMES.index(_RULE["backbone"])
+        if "vars" in _RULE:
+            _RULE["var_idx"] = [SCAN_NAMES.index(v) for v in _RULE["vars"]]
     return _RULE
 
 
@@ -96,6 +98,60 @@ def score_event(x, y, z, e, tpc, labels, ts_final, actual, base_image,
     n_scan = 0
     all_labs = np.unique(labels[(labels >= 0)])
     fin = np.isfinite(ts) & (ts >= 0)
+    if rule.get("mode") == "formula":
+        # v0.10.3 (user design, NO MC in the score):
+        # conf = pcu_vote10 * rel_margin/(1+rel_margin); light-blind -> NaN
+        iv = SCAN_NAMES.index("pcu_vote10")
+        ir = SCAN_NAMES.index("rel_margin")
+        for L in all_labs:
+            L = int(L)
+            if not (fin & (labels == L)).any():
+                continue
+            sf = sfeats.get(L)
+            if sf is None:
+                continue                     # NaN = no estimate
+            n_scan += 1
+            v = float(sf[0][iv])
+            r = max(float(sf[0][ir]), 0.0)
+            conf = v * r / (1.0 + r)
+            lab_conf[L] = conf
+            hit_conf[labels == L] = np.float32(conf)
+        stats = {"n_clusters": len(lab_conf), "n_with_scan": n_scan,
+                 "mode": "formula"}
+        if lab_conf:
+            vals = np.array(list(lab_conf.values()))
+            stats["conf_med"] = round(float(np.median(vals)), 3)
+            stats["conf_frac_lo"] = round(float((vals < 0.1).mean()), 3)
+        return lab_conf, hit_conf, stats
+    if rule.get("mode") == "table2d":
+        # v0.10.3: conf = measured purity of the (vote10, rel_margin) cell
+        ve = np.asarray(rule["v_edges"]); re_ = np.asarray(rule["r_edges"])
+        tab = np.asarray(rule["table"])
+        for L in all_labs:
+            L = int(L)
+            if not (fin & (labels == L)).any():
+                continue
+            sf = sfeats.get(L)
+            if sf is None:
+                conf = float(rule.get("no_scan_conf", 0.59))
+            else:
+                n_scan += 1
+                a = float(sf[0][rule["var_idx"][0]])
+                b = float(sf[0][rule["var_idx"][1]])
+                i = int(np.clip(np.searchsorted(ve, a, side="right"), 0,
+                                tab.shape[0] - 1))
+                j = int(np.clip(np.searchsorted(re_, b, side="right"), 0,
+                                tab.shape[1] - 1))
+                conf = float(tab[i, j])
+            lab_conf[L] = conf
+            hit_conf[labels == L] = np.float32(conf)
+        stats = {"n_clusters": len(lab_conf), "n_with_scan": n_scan,
+                 "mode": "table2d"}
+        if lab_conf:
+            vals = np.array(list(lab_conf.values()))
+            stats["conf_med"] = round(float(np.median(vals)), 3)
+            stats["conf_frac_lo"] = round(float((vals < 0.5).mean()), 3)
+        return lab_conf, hit_conf, stats
     if rule.get("mode") == "product":
         # v0.10.2 user design: conf = pcu_vote10 * penalty factors
         for L in all_labs:

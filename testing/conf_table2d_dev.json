@@ -1,0 +1,98 @@
+{
+ "mode": "table2d",
+ "vars": [
+  "pcu_vote10",
+  "rel_margin"
+ ],
+ "v_edges": [
+  0.5738,
+  0.8462,
+  0.9616,
+  1.0
+ ],
+ "r_edges": [
+  0.4078,
+  0.6703,
+  0.8254,
+  1.2974
+ ],
+ "table": [
+  [
+   0.595,
+   0.548,
+   0.469,
+   0.585,
+   0.743
+  ],
+  [
+   0.809,
+   0.914,
+   0.895,
+   0.984,
+   0.972
+  ],
+  [
+   0.76,
+   0.914,
+   0.953,
+   0.995,
+   0.999
+  ],
+  [
+   0.274,
+   0.883,
+   0.936,
+   0.998,
+   0.998
+  ],
+  [
+   0.627,
+   0.835,
+   0.867,
+   0.998,
+   0.997
+  ]
+ ],
+ "cell_counts": [
+  [
+   1998,
+   1152,
+   573,
+   351,
+   601
+  ],
+  [
+   587,
+   918,
+   745,
+   743,
+   347
+  ],
+  [
+   53,
+   330,
+   630,
+   885,
+   773
+  ],
+  [
+   7,
+   42,
+   146,
+   371,
+   679
+  ],
+  [
+   27,
+   229,
+   578,
+   321,
+   272
+  ]
+ ],
+ "no_scan_conf": 0.59,
+ "tuned_on": "file 0000001 (13 events), 2026-09-04",
+ "auc_Ewt": 0.951,
+ "auc_count": 0.781,
+ "note": "user design 2026-09-04: two variables only (pcu_vote10 backbone, rel_margin the one useful helper). conf = measured E-weighted purity of the (vote10, rel_margin) quantile cell - self-calibrated 5x5 lookup; captures the high-vote/low-margin swap cell (purity 0.27) that a product form cannot express. Alternative formula: v10*min(1,rm/1.2) at E-wt 0.946."
+}
