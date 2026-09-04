@@ -32,6 +32,7 @@ coverage; **all-TPC** = every TPC. 126-event reference sample = files
 | v0.10.5 | 09-04 | 96.50 | 95.65 | conf = pcu_vote10 directly (zero parameters, data-only); 3-file confirm: out-of-sample AUC 0.777/0.936 E-wt, reading key 33->99% purity, 0.65 s/ev; run_v0105.sh. v1.0 deferred: speed campaign first |
 | v0.10.6 | 09-04 | 96.50 | 95.65 | low-E simplification: KD-tree force (11.8->0.3 s) + 25cm isolation veto (refuses 0.04% hits) + LE-ranker stage DELETED (5.0->0 s); eff -0.006 pp; ~50 s/ev/GPU; run_v0106.sh |
 | v0.10.7 | 09-04 | 96.50 | 95.65 | fast-scan ADOPTED (rank-1 row-split collapse, 6834 calls/ev at 100% fast, bit-identical; backbone 19.7->16.3); TF32 null; 55.0 s/ev/GPU broad accounting (was 64.8); run_v0107.sh |
+| **v1.0** | 09-04 | 96.50 | 95.65 | **FIRST RELEASE** = v0.10.7 chain + vote10 confidence: continuous t0s + sigma_t + zero-parameter data-only hit_t0_conf (out-of-sample AUC 0.777/0.936 E-wt), 25cm isolation veto, 55.0 s/ev/GPU; run_v1.sh |
 
 \* 39-event sample, pre length-gate fix — not comparable to later numbers.
 † file-0000001 same-node pair; 126-ev v0.8.6 row is the certified one.
