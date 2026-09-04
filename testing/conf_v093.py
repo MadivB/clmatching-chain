@@ -25,7 +25,7 @@ sys.path.insert(0, HERE)
 
 from scan_margin import event_scan_feats, SCAN_NAMES
 
-DEFAULT_RULE = os.path.join(HERE, "conf_rule_v0103.json")
+DEFAULT_RULE = os.path.join(HERE, "conf_rule_v1.json")
 _RULE = None
 _MODEL = None
 
@@ -98,6 +98,28 @@ def score_event(x, y, z, e, tpc, labels, ts_final, actual, base_image,
     n_scan = 0
     all_labs = np.unique(labels[(labels >= 0)])
     fin = np.isfinite(ts) & (ts >= 0)
+    if rule.get("mode") == "backbone":
+        # v1.0 (user 2026-09-04): conf = pcu_vote10, directly.
+        # Zero tuned parameters; light-blind -> NaN (no estimate).
+        ib = SCAN_NAMES.index(rule["backbone"])
+        for L in all_labs:
+            L = int(L)
+            if not (fin & (labels == L)).any():
+                continue
+            sf = sfeats.get(L)
+            if sf is None:
+                continue                     # NaN = no estimate
+            n_scan += 1
+            conf = float(np.clip(sf[0][ib], 0.0, 1.0))
+            lab_conf[L] = conf
+            hit_conf[labels == L] = np.float32(conf)
+        stats = {"n_clusters": len(lab_conf), "n_with_scan": n_scan,
+                 "mode": "backbone"}
+        if lab_conf:
+            vals = np.array(list(lab_conf.values()))
+            stats["conf_med"] = round(float(np.median(vals)), 3)
+            stats["conf_frac_lo"] = round(float((vals < 0.1).mean()), 3)
+        return lab_conf, hit_conf, stats
     if rule.get("mode") == "formula":
         # v0.10.3 (user design, NO MC in the score):
         # conf = pcu_vote10 * rel_margin/(1+rel_margin); light-blind -> NaN

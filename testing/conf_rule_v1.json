@@ -1,0 +1,10 @@
+{
+ "mode": "backbone",
+ "backbone": "pcu_vote10",
+ "formula": "conf = pcu_vote10  (amp-weighted fraction of light channels whose own loss minimum is within +-10 ticks of the placement)",
+ "no_scan": "NaN (no estimate - light-blind cluster)",
+ "mc_truth_use": "NONE - no thresholds, no calibration, no tuned numbers. MC used only for validation figures.",
+ "auc_Ewt": 0.911,
+ "auc_count": 0.779,
+ "designed": "user 2026-09-04: v1.0 - the most intuitive and straightforward measure; the vote10-vs-(vote10 x rel_margin Hill) decision is deferred (see memory + V090.md)"
+}
