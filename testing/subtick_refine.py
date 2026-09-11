@@ -111,7 +111,7 @@ def run_subtick_refine(ns, *, ckpt=None, truth_t0=None, half_ticks=3.0,
                        step=0.25, group_merge=0.5, min_group_mev=0.0,
                        hit_refine=None, flow_path=None, chan_min_amp=400.0,
                        chan_amp_floor=300.0, chan_knn=12, amp_mode="sum",
-                       dump_path=None):
+                       dump_path=None, study=False):
     # amp_mode "sum" (default, user 2026-09-02: slight precision loss
     # accepted for speed): group amplitude = sum of the members' stage-1
     # per-cluster amplitudes on support channels - no re-voxelize/model.
@@ -209,6 +209,8 @@ def run_subtick_refine(ns, *, ckpt=None, truth_t0=None, half_ticks=3.0,
         for (lab, c), im in image_maps.items():
             by_label.setdefault(int(lab), []).append((int(c), im))
         for gi, g in enumerate(ginfo):
+            if study:
+                g["lab_amps"] = {}
             for lab in np.unique(labs_g[g["mask"]]):
                 for c, im in by_label.get(int(lab), []):
                     if not (0 <= c < n_light):
@@ -218,6 +220,9 @@ def run_subtick_refine(ns, *, ckpt=None, truth_t0=None, half_ticks=3.0,
                         g["amp"][c] += a_vec
                     else:
                         g["amp"][c] = a_vec
+                    if study:
+                        la = g["lab_amps"].setdefault(int(lab), {})
+                        la[c] = la.get(c, 0.0) + a_vec
             for c, a_vec in g["amp"].items():
                 g["sup"][c] = np.flatnonzero(a_vec * tmpl_max > 1.0)
 
@@ -251,6 +256,10 @@ def run_subtick_refine(ns, *, ckpt=None, truth_t0=None, half_ticks=3.0,
 
     # ---- stage E: one time per group ----
     dts = []
+    labels_g_all = np.asarray(ns.get("labels_global", np.full(ts.size, -1)))
+    ts_grid = ts.copy()          # study arm 2: 0.25-tick discrete argmin
+    ts_perclu = ts.copy()        # study arm 4: per-CLUSTER quadratic fit
+    nlab_hit = np.zeros(ts.size, np.int16)   # family multiplicity per hit
     for gi, g in enumerate(ginfo):
         group_id[g["mask"]] = gi
         curve = np.zeros(offs.size)
@@ -272,6 +281,35 @@ def run_subtick_refine(ns, *, ckpt=None, truth_t0=None, half_ticks=3.0,
         if not any_sup:
             continue
         xs, why, a_curv = _quad(curve)
+        if study:
+            ts_grid[g["mask"]] = g["t"] + float(offs[int(np.argmin(curve))])
+            labs_here = np.unique(labels_g_all[g["mask"] & (labels_g_all >= 0)])
+            nlab_hit[g["mask"]] = np.int16(min(len(labs_here), 32000))
+            for lab, lamps in g.get("lab_amps", {}).items():
+                curve_l = np.zeros(offs.size)
+                any_l = False
+                for c, a_vec in lamps.items():
+                    ch = np.flatnonzero(a_vec * tmpl64.max() > 1.0)
+                    if not ch.size:
+                        continue
+                    if ch.size > TOP_ROWS:
+                        ch = ch[np.argsort(a_vec[ch])[::-1][:TOP_ROWS]]
+                    any_l = True
+                    others = np.maximum(g["amp"][c] - a_vec, 0.0)
+                    base_l = (_field(c, ch, gi)
+                              + others[ch, None] * _shift1(tmpl64, g["t"])[None, :])
+                    a_c, w_c = actual[c][ch], w_full[c][ch]
+                    amp_col = a_vec[ch, None]
+                    for k, dt_l in enumerate(offs):
+                        pred = np.minimum(
+                            base_l + amp_col * _shift1(tmpl64, g["t"] + dt_l)[None, :],
+                            CLIP)
+                        curve_l[k] += float((w_c * np.square(pred - a_c)).sum())
+                if not any_l:
+                    continue
+                xs_l, why_l, _al = _quad(curve_l)
+                m_l = g["mask"] & (labels_g_all == lab)
+                ts_perclu[m_l] = g["t"] + (float(xs_l) if why_l == "ok" else 0.0)
         g["curve_min"] = float(curve.min())
         g["curve_contrast"] = float((curve.max() - curve.min()) / max(abs(curve.min()), 1.0))
         g["fit_status"] = {"ok": 0.0, "range": 1.0, "nonconvex": 2.0}[why]
@@ -482,6 +520,9 @@ def run_subtick_refine(ns, *, ckpt=None, truth_t0=None, half_ticks=3.0,
             ch_amp=np.array([a for t in chdump or [] for a in t[4]], np.float32),
             ch_t=np.array([v for t in chdump or [] for v in t[5]], np.float32),
             ch_n=np.array([len(t[3]) for t in chdump or []], np.int32),
+            ts_grid=(ts_grid.astype(np.float32) if study else np.zeros(0, np.float32)),
+            ts_perclu=(ts_perclu.astype(np.float32) if study else np.zeros(0, np.float32)),
+            nlab_grp=(nlab_hit if study else np.zeros(0, np.int16)),
             hit_x=x.astype(np.float32), hit_y=y.astype(np.float32),
             hit_z=z.astype(np.float32), hit_tpc=tpc.astype(np.int32),
             truth=(np.asarray(truth_t0, np.float32) if truth_t0 is not None

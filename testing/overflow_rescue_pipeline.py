@@ -475,6 +475,10 @@ def main() -> int:
                          "(3 evidence families, HGB+isotonic); needs --subtick")
     ap.add_argument("--conf-model", default="",
                     help="override path to subtick_conf_model3.joblib")
+    ap.add_argument("--subtick-merge", type=float, default=0.5,
+                    help="stage-E family merge tolerance in ticks (default 0.5)")
+    ap.add_argument("--subtick-study", action="store_true",
+                    help="dump study arms: grid-argmin + per-cluster fits")
     ap.add_argument("--subtick-dump", default="",
                     help="dir for per-hit (ts_before, ts_after, truth, e) "
                          "npz dumps from the subtick stage")
@@ -2320,6 +2324,8 @@ def main() -> int:
                                             f"{_ftag6}_ev{ev_id}.npz")
                     st6 = run_subtick_refine(
                         ns1, ckpt=args.light_ckpt, truth_t0=truth_t0,
+                        group_merge=float(args.subtick_merge),
+                        study=bool(args.subtick_study),
                         min_group_mev=5.0,   # sub-5 MeV = light-blind (E_tiny): no refinable information
                         hit_refine=("channel6" if args.subtick_hit else None),
                         flow_path=file_path, dump_path=_dp6)
