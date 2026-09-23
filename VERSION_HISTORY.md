@@ -361,3 +361,32 @@ prototype with all knobs), v12_eval.py, v12_calib_ab.py, sbatch_v12_P1.sh.
 Gotchas: h5py cannot open the dunepro /pscratch flow files from a login node
 (HDF5_USE_FILE_LOCKING=FALSE, or the file-1 flow for geometry); the stored
 template carries ~100 pre-trigger samples before its rise.
+
+### v1.2.1 (2026-09-23): multiple starting times per family (pieces)  *(user: time-of-flight needs per-fragment t0)*
+
+`--precision-pieces` (now in run_v12.sh): each family is split into 3-cm
+contact-chained pieces; the family (core) fit is the certified v1.2 fit; every
+displaced piece >= 5 MeV gets a FREE time from its own support channels on the
+residual after everything else (scan +-10 ticks), but only on channels where
+its own predicted light is at least comparable to everything else there — with
+fewer than three such channels it keeps the family's apex-clock time (sigma
+NaN).  Delivered per piece: delay to the core apex time, distance, implied
+beta, sigma (`row["phase3"]["pieces"]`); per family: apex time, sigma, apex
+position, energy (`row["phase3"]["families"]`) for time-of-flight pairing.
+Measured (39 events, offline == in-chain): bulk per-hit resolution unchanged
+(6.43 / 2.95 -> 6.41 / 2.96 ns), 22.7 light-resolvable pieces per event of
+~1000, delay resolution 4.5 ns robust, +3.5 s/ev.  Physics found on the way:
+(1) a truth apex time taken from the earliest 2 % of core hits is pulled early
+by pathological hits in big families and fakes 20-100 ns "delays" — use the
+median of (truth - d/c) over the core; (2) pieces that then still looked
+delayed were impure clusters (a minority of hits with late truth) whose light
+sits at the chain tick — the fits are right; within the +-10-tick assignment
+window this sample has no genuinely delayed light-resolvable fragment
+population; (3) the genuinely late population (clusters >= 5 MeV with truth
+> 10 ticks after the nearest bigger neighbour within 1 m: 207 GeV / 39 ev,
+median delay 2.95 us) is timed by the chain at its own flash for 95 % of the
+energy, i.e. as separate families with their own v1.2 apex time — a
+time-of-flight delay is the difference of two family times (2.6 ns robust
+each); < 5 MeV deposits are light-blind and carry only their association time.
+Tools: v121_fragments.py, v121_piece_test.py, v121_piece_debug.py,
+v121_piece_eval.py, v121_slow_census.py, v121_bulk_check.py.

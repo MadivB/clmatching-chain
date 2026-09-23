@@ -1,6 +1,8 @@
 #!/bin/bash
 # v1.2 canonical charge-light matching = v1.1 chain (run_v11.sh) + stage P per-hit precision timing:
-#   --precision --precision-calib testing/v120_calib_lowi.json --precision-rounds 3
+#   --precision --precision-calib testing/v120_calib_lowi.json --precision-rounds 3 --precision-pieces
+#   (v1.2.1: displaced pieces >= 5 MeV with their own channels get a free time; per-piece delay / distance /
+#    beta / sigma and a per-family apex-time table are written to the event rows for time-of-flight pairing)
 #   (per-family support channels, delay-aware per-channel fits on the pile-up residual, weighted-median
 #    family apex time, apex-clock per-hit deposition times, in-situ k_idx / per-type slew calibrated on the
 #    low-intensity sample; delivers hit_t0_sigma_p per hit).  Assignment identical to v1.1.
@@ -29,7 +31,7 @@ V12="--backbone stack2 --merge-p2 --sigma-mode poisson --max-clip-ticks 4 \
 --p2-threshold 20 --predict-min-energy 0.5 --predict-min-energy-shower 1.5 \
 --skip-v2 --gate-support --force-simple --isolate-cm 25 --fast-scan --edge-penalty \
 --pool-mode light --redecide --redecide-emin 20 \
---precision --precision-rounds 3 --precision-calib $HERE/testing/v120_calib_lowi.json \
+--precision --precision-rounds 3 --precision-calib $HERE/testing/v120_calib_lowi.json --precision-pieces \
 --subtick --conf-cluster --light-ckpt $SMALL --frontend-repo $FRONTEND"
 
 mkdir -p "$OUT"

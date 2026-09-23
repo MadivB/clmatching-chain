@@ -47,6 +47,9 @@ QUAD_HW = 4              # 9-point parabola (0.25-tick steps)
 MIN_A = 300.0            # per-channel fitted peak amplitude [ADC] to count a channel
 MAX_HITS = 1000          # hits sampled for the arrival density
 ROUNDS = 3               # pile-up model iterations: others re-rendered at their refined arrival-equivalent times
+PIECE_R = 3.0            # cm: contact radius chaining clusters into pieces (the chain's hit-graph link radius)
+PIECE_MIN_MEV = 5.0      # a displaced piece below this keeps the core's v = c time (light-blind)
+SCAN_PIECE = np.arange(-40, 41) * 0.25   # +-10 ticks: a displaced fragment may sit anywhere in the assignment window
 
 _TMPL = None
 
@@ -101,7 +104,8 @@ def _torch_dev():
     return _TORCH["dev"]
 
 
-def _family_channels(hx, he, apexes, chans, sipm_c, R, W, ks, t_chain, calib, pile):
+def _family_channels(hx, he, apexes, chans, sipm_c, R, W, ks, t_chain, calib, pile, scan=None):
+    SCAN_ = SCAN if scan is None else scan
     """Vectorized per-channel delay-aware fits on the window residual R (nc, nk) with weights W,
     for ALL apex candidates at once (rows stacked).  Returns a list per candidate of
     (rows, total_loss): rows = (ch, shift_raw [ticks], curvature, A, pile, shift_corr [ticks])."""
@@ -120,7 +124,7 @@ def _family_channels(hx, he, apexes, chans, sipm_c, R, W, ks, t_chain, calib, pi
     R = np.tile(R, (na, 1)); W = np.tile(W, (na, 1)); pile = np.tile(pile, na)
     chans_all = np.tile(chans, na); cand_of = np.repeat(np.arange(na), nc)
     # fine index of tick k for apex time (t_chain + s): ((k - t_chain - s)*NS - ARR_LO)/FINE  -> (nS, nk), same for all channels
-    m = ((ks[None, :] - t_chain - SCAN[:, None]) * NS - ARR_LO) / FINE
+    m = ((ks[None, :] - t_chain - SCAN_[:, None]) * NS - ARR_LO) / FINE
     nconv = NB + T["tf"].size - 1
     m = np.clip(m, 0, nconv - 1.001)
     i0 = np.floor(m).astype(np.int64); fr = m - i0
@@ -153,7 +157,7 @@ def _family_channels(hx, he, apexes, chans, sipm_c, R, W, ks, t_chain, calib, pi
     j0 = np.argmin(Ls, axis=1)
     lmin = Ls[np.arange(na * nc), j0]
     tots = [float(lmin[cand_of == ai].sum()) for ai in range(na)]
-    ok = (j0 >= QUAD_HW) & (j0 <= SCAN.size - 1 - QUAD_HW)
+    ok = (j0 >= QUAD_HW) & (j0 <= SCAN_.size - 1 - QUAD_HW)
     out = [([], tots[ai]) for ai in range(na)]
     if not ok.any():
         return out
@@ -170,7 +174,7 @@ def _family_channels(hx, he, apexes, chans, sipm_c, R, W, ks, t_chain, calib, pi
         if not good[n_]:
             continue
         ch = int(chans_all[ci])
-        y = float(SCAN[j0[ci]] + xs[n_])
+        y = float(SCAN_[j0[ci]] + xs[n_])
         bt = calib["beta_t"].get(int(calib["type_of"][ch]), calib["beta"])
         y_corr = y - (calib["k_idx"][ch] + bt * np.log10(max(A[n_], 1.0))) / NS
         out[int(cand_of[ci])][0].append((ch, y, float(a[n_]), float(A[n_]), float(pile[ci]), y_corr))
@@ -186,8 +190,32 @@ def _mean_arrival_ns(hx, he, apex, chans, sipm_c, pat):
     return float(np.average(per_ch, weights=np.maximum(pat[chans], 1e-9)))
 
 
+def _pieces(idx, xyz, labels, e):
+    """Split a family's hits into pieces: clusters chained by PIECE_R contact, biggest first.
+    Returns list of hit-index arrays, core first."""
+    from scipy.spatial import cKDTree
+    labs = np.unique(labels[idx])
+    hits = {int(L): idx[labels[idx] == L] for L in labs}
+    E = {L: float(e[h].sum()) for L, h in hits.items()}
+    trees = {L: cKDTree(xyz[h]) for L, h in hits.items()}
+    unassigned = set(hits); comps = []
+    while unassigned:
+        seed = max(unassigned, key=lambda L: E[L])
+        comp = {seed}; frontier = [seed]; unassigned.discard(seed)
+        while frontier:
+            cur = frontier.pop()
+            for L in list(unassigned):
+                dd, _ = trees[cur].query(xyz[hits[L]], k=1, distance_upper_bound=PIECE_R)
+                if np.isfinite(dd).any():
+                    comp.add(L); frontier.append(L); unassigned.discard(L)
+        comps.append(np.concatenate([hits[L] for L in comp]))
+    comps.sort(key=lambda h: -float(e[h].sum()))
+    return comps
+
+
 def precision_fit(xyz, e, tpc, labels, ts, amp, full, veto, sipm, calib, *,
-                  min_fam_mev=5.0, min_hits=10, max_hits=MAX_HITS, collect=False, rounds=ROUNDS):
+                  min_fam_mev=5.0, min_hits=10, max_hits=MAX_HITS, collect=False, rounds=ROUNDS,
+                  pieces=False):
     """Core.  amp: {(label, light_tpc): (120,) peak amplitudes}; full: (n_light,120,1000);
     sipm: {light_tpc: (120,3)}.  Returns (new_ts, hit_sigma_ticks, stats)."""
     t_start = time.time()
@@ -208,14 +236,16 @@ def precision_fit(xyz, e, tpc, labels, ts, amp, full, veto, sipm, calib, *,
             lab_t[int(L)] = float(np.median(v))
     tpcs_needed = sorted(int(c) for c in np.unique(tpc[ok]) if int(c) in sipm and int(c) < n_light)
     st = {}
-    fam_render = {}          # (tpc, chain t) -> arrival-equivalent refined time used to render this family
+    fam_render = {}          # (tpc, chain t) -> arrival-equivalent refined time used to render this family (core)
+    lab_render = {}          # (tpc, label) -> arrival-equivalent refined time for labels timed separately (pieces)
     n_rounds = max(1, int(rounds))
     for rnd in range(n_rounds):
-        st = {"n_fam": 0, "n_fit": 0, "n_ch_used": 0, "e_fit": 0.0, "dt_med_ns": [], "sig_ns": [], "rows": [], "apex_win": [0, 0, 0]}
+        st = {"n_fam": 0, "n_fit": 0, "n_ch_used": 0, "e_fit": 0.0, "dt_med_ns": [], "sig_ns": [], "rows": [], "apex_win": [0, 0, 0],
+              "n_piece": 0, "n_piece_fit": 0, "pieces": []}
         model = {c: np.zeros((n_ch, n_ticks)) for c in tpcs_needed}
         for (L, c), a_vec in amp.items():
             if int(c) in model and int(L) in lab_t:
-                t_use = fam_render.get((int(c), lab_t[int(L)]), lab_t[int(L)])
+                t_use = lab_render.get((int(c), int(L)), fam_render.get((int(c), lab_t[int(L)]), lab_t[int(L)]))
                 sh = np.interp(tick_idx - t_use, np.arange(T["t16"].size), T["t16"], left=0.0, right=0.0)
                 model[int(c)] += np.asarray(a_vec, np.float64)[:, None] * sh[None, :]
         for c in tpcs_needed:
@@ -226,7 +256,9 @@ def precision_fit(xyz, e, tpc, labels, ts, amp, full, veto, sipm, calib, *,
                 if E < min_fam_mev or m.sum() < min_hits:
                     continue
                 st["n_fam"] += 1
-                idx = np.flatnonzero(m)
+                idx_all = np.flatnonzero(m)
+                piece_list = _pieces(idx_all, xyz, labels, e) if pieces else [idx_all]
+                idx = idx_all                             # the family fit is the certified v1.2 fit (all hits)
                 pat = np.zeros(n_ch)
                 for L in np.unique(labels[idx]):
                     a_vec = amp.get((int(L), int(c)))
@@ -248,6 +280,9 @@ def precision_fit(xyz, e, tpc, labels, ts, amp, full, veto, sipm, calib, *,
                 others_win = model[c][chans][:, ks] - own_win                          # (nc, nk)
                 own_col = pat[chans] * float(np.interp(col - t_self, np.arange(T["t16"].size), T["t16"]))
                 pile = np.maximum(model[c][chans, col] - own_col, 0.0) / np.maximum(pat[chans], 1e-9)
+                if pieces:
+                    # the family's displaced pieces stay in 'others' at their current times; this fit is the CORE only
+                    pass
                 R_win = full[c][chans][:, ks] - others_win
                 W_win = w_tick[c][chans][:, ks]
                 hs = idx if idx.size <= max_hits else idx[np.linspace(0, idx.size - 1, max_hits).astype(int)]
@@ -276,6 +311,69 @@ def precision_fit(xyz, e, tpc, labels, ts, amp, full, veto, sipm, calib, *,
                 sig[idx] = s_fam
                 st["n_fit"] += 1; st["n_ch_used"] += len(rows); st["e_fit"] += E
                 st["dt_med_ns"].append(shift * NS); st["sig_ns"].append(s_fam * NS)
+                if pieces and len(piece_list) > 1:
+                    core_apex, core_t0 = apex, t0          # family time from the collective fit above
+                    fam_arr = fam_render[(int(c), float(tv))]
+                    for pidx in piece_list[1:]:
+                        Ep = float(e[pidx].sum())
+                        st["n_piece"] += 1                 # non-fitted pieces keep the family time and sigma
+                        if Ep < PIECE_MIN_MEV:
+                            continue
+                        ppat = np.zeros(n_ch)
+                        for L in np.unique(labels[pidx]):
+                            a_vec = amp.get((int(L), int(c)))
+                            if a_vec is not None:
+                                ppat += np.asarray(a_vec, np.float64)
+                        ppat[np.asarray(veto[c], bool)] = 0.0
+                        if ppat.max() <= 1.0:
+                            continue
+                        po = np.argsort(ppat)[::-1]; pcs = np.cumsum(ppat[po])
+                        pch = po[: int(np.searchsorted(pcs, 0.9 * pcs[-1])) + 1]; pch = pch[ppat[pch] > 1.0]
+                        pks = np.arange(col0 + PEAK + WIN_LO - 10, col0 + PEAK + WIN_HI + 11)   # wider window for the wider scan
+                        pks = pks[(pks >= 0) & (pks < n_ticks)]
+                        # others for the piece = model (everything at current render times) minus this piece's own light at the chain tick
+                        p_labels = [int(L) for L in np.unique(labels[pidx])]
+                        p_tself = lab_render.get((int(c), p_labels[0]), fam_arr if rnd > 0 else tv)
+                        p_own = ppat[pch, None] * np.interp(pks - p_tself, np.arange(T["t16"].size), T["t16"], left=0.0, right=0.0)[None, :]
+                        p_others = model[c][pch][:, pks] - p_own
+                        p_own_col = ppat[pch] * float(np.interp(col - p_tself, np.arange(T["t16"].size), T["t16"]))
+                        p_pile = np.maximum(model[c][pch, col] - p_own_col, 0.0) / np.maximum(ppat[pch], 1e-9)
+                        pR = full[c][pch][:, pks] - p_others; pW = w_tick[c][pch][:, pks]
+                        phs = pidx if pidx.size <= max_hits else pidx[np.linspace(0, pidx.size - 1, max_hits).astype(int)]
+                        phx, phe = xyz[phs], np.maximum(e[phs], 1e-6)
+                        pcen = np.average(phx, axis=0, weights=phe)
+                        if phx.shape[0] >= 3:
+                            pu = np.linalg.svd((phx - pcen) * np.sqrt(phe)[:, None], full_matrices=False)[2][0]
+                            pproj = (phx - pcen) @ pu; poo = np.argsort(pproj); pn2 = max(1, int(0.02 * poo.size))
+                            pcands = [np.average(phx[poo[:pn2]], axis=0, weights=phe[poo[:pn2]]), np.average(phx[poo[-pn2:]], axis=0, weights=phe[poo[-pn2:]]), pcen]
+                        else:
+                            pcands = [pcen]
+                        pres = _family_channels(phx, phe, pcands, pch, sipm[c], pR, pW, pks, tv, calib, p_pile, scan=SCAN_PIECE)
+                        pai = int(np.argmin([tt for _, tt in pres])); prows, ptot = pres[pai]; papex = pcands[pai]
+                        # a displaced piece is resolvable by light only on channels where its OWN predicted
+                        # light is at least comparable to everything else there (pile < 1); fewer than 3 such
+                        # channels -> keep the core's v = c time (flagged by sig = NaN)
+                        prows = [r_ for r_ in prows if r_[4] < 1.0]
+                        st["n_piece_dom"] = st.get("n_piece_dom", 0) + (1 if len(prows) >= 3 else 0)
+                        if len(prows) < 3:
+                            continue
+                        pr = np.array(prows, dtype=float)
+                        pwgt = np.sqrt(pr[:, 3]) * (1.0 - pr[:, 4])
+                        pshift = _wmedian(pr[:, 5], pwgt); pt0 = tv + pshift
+                        pmad = 1.4826 * float(np.median(np.abs(pr[:, 5] - pshift))); ps = pmad / np.sqrt(len(prows))
+                        new_t[pidx] = pt0 + np.linalg.norm(xyz[pidx] - papex, axis=1) / C / NS
+                        sig[pidx] = ps
+                        p_arr = pt0 + _mean_arrival_ns(phx, phe, papex, pch, sipm[c], ppat) / NS
+                        for L in p_labels:
+                            lab_render[(int(c), int(L))] = p_arr
+                        dist = float(np.linalg.norm(papex - core_apex))
+                        dt_ns = (pt0 - core_t0) * NS
+                        st["n_piece_fit"] += 1
+                        if collect and rnd == n_rounds - 1:
+                            st["pieces"].append(dict(tpc=int(c), t_chain=float(tv), E=Ep, n_ch=len(prows), t0_core=float(core_t0),
+                                                     t0_piece=float(pt0), dt_ns=dt_ns, dist_cm=dist,
+                                                     beta=(dist / (C * dt_ns) if dt_ns > 0.5 else None), sig_ns=float(ps * NS),
+                                                     labels=[int(L) for L in np.unique(labels[pidx])]))
                 if collect and rnd == n_rounds - 1:
                     st["rows"].append(dict(tpc=int(c), t_chain=float(tv), t0=float(t0), E=E, n_ch=len(rows),
                                            sig_ns=float(s_fam * NS), apex=[float(v) for v in apex],

@@ -522,6 +522,10 @@ def main() -> int:
                     help="v1.2 calibration JSON (k_idx, beta_t, type_of) from v120_calibrate.py")
     ap.add_argument("--precision-rounds", type=int, default=3,
                     help="v1.2 pile-up model iterations")
+    ap.add_argument("--precision-pieces", action="store_true",
+                    help="v1.2.1: split each family into contact-chained pieces; the core keeps "
+                         "the apex clock, every displaced piece >= 5 MeV gets its OWN free time "
+                         "(scan +-10 ticks on the residual) -> per-piece delay, distance, beta")
     ap.add_argument("--pool-spatial", type=float, default=0.0,
                     help="v1.1 charge-contact prior in the component search: connected "
                          "members (hit clouds within 3 cm) get a same-time bonus of this "
@@ -2491,9 +2495,20 @@ def main() -> int:
                         stp = run_precision(ns1, flow_path=file_path,
                                             calib_path=(args.precision_calib or None),
                                             veto_mask=veto_mask,
-                                            rounds=int(args.precision_rounds))
+                                            rounds=int(args.precision_rounds),
+                                            pieces=bool(args.precision_pieces),
+                                            collect=bool(args.precision_pieces))
                         stp["time_s"] = round(time.time() - t_sp, 2)
-                        stp.pop("rows", None)
+                        _frows = stp.pop("rows", [])
+                        _pcs = stp.pop("pieces", [])
+                        if args.precision_pieces:
+                            p3_row["pieces"] = _pcs[:400]        # per-piece delay / distance / beta / sigma
+                            # compact per-family table for time-of-flight pairing: apex time, sigma, apex xyz, E
+                            p3_row["families"] = [dict(tpc=int(fr["tpc"]), t_chain=round(float(fr["t_chain"]), 3),
+                                                       t0=round(float(fr["t0"]), 4), sig_ns=round(float(fr["sig_ns"]), 3),
+                                                       E=round(float(fr["E"]), 2), n_ch=int(fr["n_ch"]),
+                                                       apex=[round(float(v), 1) for v in fr["apex"]])
+                                                  for fr in _frows][:1500]
                         p3_row["precision"] = stp
                     except Exception as _spe:
                         p3_row["precision"] = {"error": repr(_spe)}

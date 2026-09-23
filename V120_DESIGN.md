@@ -152,3 +152,58 @@ period-12 detector-type pattern with a 10 ns offset and per-type slews of
 | stage cost | | 9.4 s/ev median on the GPU (p90 16.7, max 28); total 116 -> 128 s/ev/worker |
 
 Adopted 2026-09-23, tag CLMatching_v1.2.
+
+## 6. v1.2.1 — multiple starting times per family (pieces), 2026-09-23
+
+User requirement: time-of-flight analysis needs displaced fragments to carry
+their own starting t0 (tracks at v = c from the apex, fragments possibly
+slower), with the velocity inferred from the fitted shift.
+
+Census (v1.2 outputs, 13 events, correctly assigned members, pieces = 3-cm
+contact chains, robust apex reference = median over core hits of truth - d/c):
+28.5 % of family energy is displaced from the main chained piece; true delays
+p50 3 ns, p90 13 ns; 17 % of fragment energy has a delay > 10 ns and 7 %
+> 30 ns; the slow population (beta < 0.5) is 23 GeV per 13 events, median delay
+12 ns at 76 cm; under v1.2's v = c assumption these fragments are mis-timed by
+their delay (rms 60-200 ns).  A first version of this census used the earliest
+2 % of core truth hits as the apex time and reported delays of 20-100 ns for
+pieces that sit exactly at the chain tick — that reference is pulled early by
+pathological hits in big families and must not be used.
+
+Piece mode (`--precision-pieces`): the core (biggest chained piece) keeps the
+family fit; every other piece of >= 5 MeV gets a FREE time from its own
+support channels on the residual after everything else, scanning +-10 ticks,
+but only on channels where its own predicted light is at least comparable to
+everything else there — with fewer than three such channels a piece is
+declared unresolvable by light and keeps the core's apex-clock time (sigma =
+NaN).  Each fitted piece is delivered with its delay to the core apex time,
+its distance from the core apex, the implied beta and its sigma.
+
+Offline truth test (4 events, correctly assigned pieces): delay resolution
+4.6 ns robust (6.1 / 3.8 / 3.8 ns for 5-20 / 20-100 / >= 100 MeV), 94 % within
+10 ns; fragment hits improve from 5.2 / 4.0 ns to 3.1 / 2.7 ns (std / robust).
+Light-resolvable pieces: 13-19 per event on the standard sample, ~6 per event
+on the low-intensity sample; the rest are flagged.
+
+### What the piece study found (in-chain P2, 39 events; debug on file 1)
+
+* Piece fits are correct: for the pieces whose energy-weighted truth appeared
+  delayed by 30-160 ns, the light and the median hit truth sit at the chain
+  tick within a fraction of a tick; the apparent delay comes from a minority
+  of hits with much later truth times inside the same cluster (impure pieces).
+  Within the assignment window this sample contains no genuinely delayed,
+  light-resolvable fragment population.
+* Delay resolution of light-resolvable pieces (751 with a truth reference):
+  4.5 ns robust for v = c pieces (5.8 / 4.4 / 4.5 ns for 5-20 / 20-100 /
+  >= 100 MeV); 21.5 light-resolvable pieces per event out of ~1000 pieces.
+* The genuinely late population (clusters >= 5 MeV with truth > 10 ticks after
+  the nearest bigger neighbour within 1 m: 3544 clusters, 207 GeV, median
+  delay 2.95 us) is timed by the chain at its OWN flash for 95 % of the energy
+  (78 / 92 / 99 % by energy band) — these are separate families, each with its
+  own v1.2 apex time (2.6 ns robust), so a time-of-flight delay is the
+  difference of two family times.  Below 5 MeV deposits are light-blind and
+  carry only their association time.
+* The piece layer is an add-on over the certified family fit (bulk resolution
+  unchanged) and delivers per piece: delay to the core apex time, distance,
+  implied beta, sigma; and per family: apex time, sigma, apex position, energy
+  (`row["phase3"]["pieces"]`, `row["phase3"]["families"]`).
