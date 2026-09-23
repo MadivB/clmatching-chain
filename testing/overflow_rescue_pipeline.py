@@ -79,6 +79,7 @@ STAGE_CHECKPOINTS = [
     ("after_redecide", "3.98_redecide"),
     ("after_swap_fix", "4.5_swap_fix"),
     ("after_force", "4.9_force_coverage"),
+    ("after_precision", "7_precision"),
 ]
 
 
@@ -512,6 +513,15 @@ def main() -> int:
                     help="v1.1 amplitude profiling band b: every phase-1/pool commit "
                          "fits its per-TPC amplitude in [1-b,1+b] against the residual "
                          "without itself (template rescaled in place); 0 = off")
+    ap.add_argument("--precision", action="store_true",
+                    help="v1.2 stage P: per-hit precision timing (per-family support "
+                         "channels, delay-aware per-channel fits on the pile-up residual, "
+                         "weighted-median family apex time, apex-clock per-hit deposition "
+                         "times, in-situ k_idx/per-type slew calibration); after stage E")
+    ap.add_argument("--precision-calib", default=os.path.join(_HERE, "v120_calib_dev13.json"),
+                    help="v1.2 calibration JSON (k_idx, beta_t, type_of) from v120_calibrate.py")
+    ap.add_argument("--precision-rounds", type=int, default=3,
+                    help="v1.2 pile-up model iterations")
     ap.add_argument("--pool-spatial", type=float, default=0.0,
                     help="v1.1 charge-contact prior in the component search: connected "
                          "members (hit clouds within 3 cm) get a same-time bonus of this "
@@ -2471,6 +2481,23 @@ def main() -> int:
                             p3_row["conf93"] = st93
                         except Exception as _c93e:
                             p3_row["conf93"] = {"error": repr(_c93e)}
+                if args.precision:
+                    # ---------- STAGE P (v1.2): per-hit precision timing ----------
+                    if _HERE not in sys.path:
+                        sys.path.insert(0, _HERE)
+                    from v120_precision import run_precision
+                    t_sp = time.time()
+                    try:
+                        stp = run_precision(ns1, flow_path=file_path,
+                                            calib_path=(args.precision_calib or None),
+                                            veto_mask=veto_mask,
+                                            rounds=int(args.precision_rounds))
+                        stp["time_s"] = round(time.time() - t_sp, 2)
+                        stp.pop("rows", None)
+                        p3_row["precision"] = stp
+                    except Exception as _spe:
+                        p3_row["precision"] = {"error": repr(_spe)}
+                    tim["after_precision"] = time.time() - t_ev
                 if args.shower_tpc:
                     if _HERE not in sys.path:
                         sys.path.insert(0, _HERE)
@@ -2630,6 +2657,8 @@ def main() -> int:
                 if args.conf_cluster and ns1.get("hit_t0_conf") is not None:
                     extra["hit_conf93"] = np.asarray(ns1["hit_t0_conf"],
                                                      np.float32)
+                if ns1.get("hit_t0_sigma_p") is not None:
+                    extra["hit_sigma_p"] = np.asarray(ns1["hit_t0_sigma_p"], np.float32)
                 # v0.9.3 confidence dev: per-label per-channel PEAK vectors
                 # (rank-1 identity: predicted image = amp x shared template, so
                 # peak-per-channel fully describes each label's light) — lets

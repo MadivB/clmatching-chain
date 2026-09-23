@@ -34,6 +34,7 @@ coverage; **all-TPC** = every TPC. 126-event reference sample = files
 | v0.10.7 | 09-04 | 96.50 | 95.65 | fast-scan ADOPTED (rank-1 row-split collapse, 6834 calls/ev at 100% fast, bit-identical; backbone 19.7->16.3); TF32 null; 55.0 s/ev/GPU broad accounting (was 64.8); run_v0107.sh |
 | **v1.0** | 09-04 | 96.50 | 95.65 | **FIRST RELEASE** = v0.10.7 chain + vote10 confidence: continuous t0s + sigma_t + zero-parameter data-only hit_t0_conf (out-of-sample AUC 0.777/0.936 E-wt), 25cm isolation veto, 55.0 s/ev/GPU; run_v1.sh |
 | **v1.1** | 09-22 | +0.26‡ | +0.17‡ | light-coupled component pool (exact combination search, 20 MeV floor) + stage 3.98 component re-decision (>= 20 MeV) + 0.5 MeV prediction floor in non-shower TPCs; 5-file cert 63 ev: NS 96.44->96.70 (52/11), all-TPC 95.37->95.54 (46/17), LE 57.9->61.0; +5 % time; run_v11.sh |
+| **v1.2** | 09-23 | = v1.1 | = v1.1 | + stage P per-hit PRECISION TIMING (2x2 v2 line, ND-adapted): per-hit sigma 6.00 -> **2.85 ns robust** (9.13 -> 6.43 std), per-family 5.87 -> 2.56 ns robust, hit_t0_sigma_p delivered (98 % of hits, median 0.44 ns); assignment identical; +9.4 s/ev; run_v12.sh |
 
 \* 39-event sample, pre length-gate fix — not comparable to later numbers.
 † file-0000001 same-node pair; 126-ev v0.8.6 row is the certified one.
@@ -291,3 +292,72 @@ v11_flips.py, v11_chunk_audit.py, v11_census.py, v11_contact_potential.py,
 run_v11arm.sh / run_v11cert.sh (files 1-3 / 1-5 runners).
 Next (user): v1.2 = v1.1 + the 2x2 per-hit precision-timing module
 (/pscratch/sd/y/yuxuan/2x2QLMatching/V2Design/ND_HANDOFF.md).
+
+
+## v1.2 (2026-09-23): per-hit precision timing  *(the 2x2 v2 line, ND-adapted)*
+
+v1.2 = v1.1 + stage P (`--precision --precision-calib testing/v120_calib_lowi.json
+--precision-rounds 3`, launcher run_v12.sh).  Membership is untouched; every
+hit gets a deposition time and a per-family uncertainty (`hit_t0_sigma_p`).
+Design and all measurements: V120_DESIGN.md; handoff source
+/pscratch/sd/y/yuxuan/2x2QLMatching/V2Design/ND_HANDOFF.md.
+
+What the census said (v1.1 outputs, truth used to measure): the 8.6 ns per-hit
+residual is a per-FAMILY time error (family offsets 9.4 ns, within-family
+1.4 ns); track propagation and light time of flight are ~1 ns effects at ND
+and the apex clock t_dep = t_apex + d/c is exact in truth; per-channel leading
+edges already reach 4 ns per channel (2.9 ns per family) but half of all
+family-channel pairs carry >= 10 % pile-up light; a +5.8 ns/decade amplitude
+slew and a period-12 channel pattern (a ~10 ns offset between the two light
+detector types hidden in the single average template) sit on top.
+
+Stage P (testing/v120_precision.py), per family = hits sharing one final t0,
+per light TPC: support channels = the channels holding 90 % of the family's
+own predicted light; per-channel delay-aware model = the family's light-
+arrival density from its hits (apex clock + n d/c, c_LAr = 13.4 cm/ns fixed,
+1/d^2 visibility proxy) convolved with the single template; fit on the
+residual after all other families, 0.25-tick scan +-3 ticks with the
+amplitude profiled and a 9-point parabola; per-channel-index delay and per-
+type slew removed; family apex time = weighted median over channels
+(sqrt(A) x (1 - pile)); sigma_t = 1.4826 MAD / sqrt(n); apex = best of the
+two principal-axis ends and the centroid by total loss; 3 pile-up iterations
+with the other families re-rendered at their refined arrival-equivalent
+times; per-hit time = t0 + |r - apex| / c.  Calibration
+(testing/v120_calibrate.py) = alternating medians on the low-intensity
+sample (60 events of MiniProdN5p1 ... lowintensity, no truth): k_idx[120] and
+beta_T per type; it agrees with a file-1 calibration to 0.67 ns rms.
+
+Certified (files 0000001-0000005, 63 events, paired vs the v1.1 outputs of
+the same events):
+
+| metric (core hits, E-weighted) | v1.1 stage E | v1.2 stage P |
+|---|---|---|
+| per-hit std / robust | 9.13 / 6.00 ns | 6.43 / **2.85 ns** |
+| per-family std / robust | 8.75 / 5.87 ns | 5.74 / **2.56 ns** |
+| per-file robust | 5.85-6.13 | 2.79-2.92 ns |
+| per-hit std with a 20 ns clip | | 3.4-3.5 ns (1.1-1.6 % of energy beyond 20 ns) |
+| delivered sigma_p | | 98.3 % of hits, median 0.44 ns |
+| assignment (NS / all-TPC) | 96.70 / 95.54 | identical within 0.01 pp |
+| stage cost | | 9.4 s/ev median on the GPU (p90 16.7); total 116 -> 128 s/ev/worker |
+
+sigma_p is an honest uncertainty: per-hit std 2.4 / 3.1 / 4.2 / 6.7 / 12 /
+23 ns in the sigma_p bins < 0.3 / 0.3-0.6 / 0.6-1 / 1-2 / 2-4 / > 4 ns (24 /
+50 / 17 / 7 / 1.8 / 0.6 % of the energy), and stage P beats stage E in every
+bin, so no fallback is applied.  Pile-up-free floor (held-out low-intensity
+events): 2.62 ns robust, 3.0 ns clipped std - the same as on the standard
+sample, so the floor is the per-channel timing with one average template and a
+per-index delay, not pile-up.  Next levers (v1.2.x, in the 2x2 order):
+per-CHANNEL k_j from the 767-file low-intensity sample, per-type templates,
+sub-sample pulse-shape fit.
+
+Measured and not adopted on the way: the 2x2 topology corrector (home rules:
+endpoint-at-shower 96 % pure, embedded fragment 93 %, isolated fragment 35 % in
+ND; v1.1 already agrees with the pure ones; the crossing-track failure mode has
+0 cases in 39 ND events - testing/v12_home_rules.py); pile-up iterations with
+the other families at their apex time (convention mismatch, diverges); the
+cumulative calibration update (must use corrected residuals).
+Tooling: v12_decompose.py, v12_channel_edges.py, v12_proto_fast.py (offline
+prototype with all knobs), v12_eval.py, v12_calib_ab.py, sbatch_v12_P1.sh.
+Gotchas: h5py cannot open the dunepro /pscratch flow files from a login node
+(HDF5_USE_FILE_LOCKING=FALSE, or the file-1 flow for geometry); the stored
+template carries ~100 pre-trigger samples before its rise.
