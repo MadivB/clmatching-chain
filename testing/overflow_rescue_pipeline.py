@@ -76,6 +76,7 @@ STAGE_CHECKPOINTS = [
     ("after_matrix_relax", "4.2_matrix_relax"),
     ("after_pass2", "3.95_pass2_trade"),
     ("after_pass3f", "3.97_pass3_family"),
+    ("after_redecide", "3.98_redecide"),
     ("after_swap_fix", "4.5_swap_fix"),
     ("after_force", "4.9_force_coverage"),
 ]
@@ -482,6 +483,48 @@ def main() -> int:
     ap.add_argument("--subtick-dump", default="",
                     help="dir for per-hit (ts_before, ts_after, truth, e) "
                          "npz dumps from the subtick stage")
+    ap.add_argument("--pool-mode", choices=["energy", "light", "light-order"], default="energy",
+                    help="v1.1: batch the merged pool by light-coupling COMPONENTS "
+                         "(cosine of amplitude patterns on a shared TPC >= --pool-cos) "
+                         "and place each component by exact COMBINATION search over "
+                         "the members' candidate times (v110_components.py); "
+                         "'energy' = v1.0 energy-banded ordering search")
+    ap.add_argument("--pool-cos", type=float, default=0.80,
+                    help="v1.1 light-coupling edge threshold (pattern cosine)")
+    ap.add_argument("--pool-k", type=int, default=6,
+                    help="v1.1 candidate times per member (isolated-curve minima)")
+    ap.add_argument("--pool-nmax", type=int, default=8,
+                    help="v1.1 exact-enumeration chunk size (k^n table)")
+    ap.add_argument("--predict-min-energy-shower", type=float, default=-1.0,
+                    help="v1.1: prediction floor [MeV] for blob clusters touching a "
+                         "shower TPC (> 1.4 GeV charge); < 0 = same as "
+                         "--predict-min-energy")
+    ap.add_argument("--pool-commit-min", type=float, default=0.0,
+                    help="v1.1: pool members below this energy [MeV] take part in the "
+                         "joint component decision as light hypotheses but are NOT "
+                         "committed by it (the tail solver places them with its spatial "
+                         "prior); 20 = the light-information boundary")
+    ap.add_argument("--pool-joint-min", type=int, default=1,
+                    help="v1.1: components smaller than this use v1.0's ordering rule; "
+                         "the exact combination search runs only from this size up "
+                         "(audit: joint pays only in crowded components)")
+    ap.add_argument("--pool-gain", type=float, default=0.0,
+                    help="v1.1 amplitude profiling band b: every phase-1/pool commit "
+                         "fits its per-TPC amplitude in [1-b,1+b] against the residual "
+                         "without itself (template rescaled in place); 0 = off")
+    ap.add_argument("--pool-spatial", type=float, default=0.0,
+                    help="v1.1 charge-contact prior in the component search: connected "
+                         "members (hit clouds within 3 cm) get a same-time bonus of this "
+                         "fraction of the chunk's median unary spread (v0.7 energy-unit "
+                         "convention); applies to the pool and to --redecide; 0 = off")
+    ap.add_argument("--redecide", action="store_true",
+                    help="v1.1 stage 3.98: after pass2, re-decide light-coupled "
+                         "COMPONENTS of placed imaged clusters jointly on the "
+                         "leave-component-out base (exact combination search; "
+                         "winner must beat the incumbent's exact loss; singletons "
+                         "never touched; shower TPCs excluded)")
+    ap.add_argument("--redecide-emin", type=float, default=5.0,
+                    help="v1.1 re-decision participant floor [MeV]")
     ap.add_argument("--fast-scan", action="store_true",
                     help="rank-1 scan fast path: collapse multi-channel FFT "
                          "scans to one 1-D template correlation (exact - "
@@ -765,6 +808,9 @@ def main() -> int:
     if args.phase3 != "none":
         cfg.prediction.min_cluster_energy_mev = (
             None if args.predict_min_energy <= 0 else float(args.predict_min_energy))
+        if args.predict_min_energy_shower >= 0:
+            cfg.prediction.min_cluster_energy_shower_tpc_mev = float(args.predict_min_energy_shower)
+            print(f"prediction floor in shower TPCs -> {args.predict_min_energy_shower} MeV", flush=True)
         print(f"phase3={args.phase3}: prediction threshold -> "
               f"{cfg.prediction.min_cluster_energy_mev} MeV", flush=True)
     if args.merge_vertex:
@@ -1062,8 +1108,19 @@ def main() -> int:
                                and cheat_is_backbone.get(int(l), False)
                                and l not in showers_b and l not in multi_b]
                 b_full = np.zeros_like(actual)
+                p1_gain_log = []
+                if args.pool_gain > 0:
+                    if _HERE not in sys.path:
+                        sys.path.insert(0, _HERE)
+                    from v110_components import profile_gain as _v110_gain
                 for lab in showers_b + multi_b + fixed_extra:
                     v02_add_label(b_full, lab, info_b[lab]["t0"], info_b, image_maps, ti_f)
+                    if args.pool_gain > 0:
+                        _g = _v110_gain(lab, info_b[lab]["t0"], b_full, info_b, image_maps,
+                                        actual, w_full, ti_f, float(args.pool_gain))
+                        if _g:
+                            p1_gain_log.append({"label": int(lab), "e": float(info_b[lab]["energy"]),
+                                                "gains": {int(c): float(v) for c, v in _g.items()}})
                     hit_t0[labels_global == lab] = np.float32(info_b[lab]["t0"])
                 se_eatenA, se_stA = {}, {}
                 if args.shower_eat and showers_b:
@@ -1103,9 +1160,36 @@ def main() -> int:
                             return np.flatnonzero(np.asarray(img).max(axis=1) > 1.0)
                     hook = make_defer_hook(info_b, image_maps, actual, veto_mask, ti_f, stx,
                                            sup_fn=gate_sup)
-                    tmap, pool_st = place_pool_v02(pool_b, 0.60, b_full, info_b, image_maps,
-                                                   actual, w_full, ti_f,
-                                                   pick=make_cos_pick("soft"), commit_hook=hook)
+                    if args.pool_mode in ("light", "light-order"):
+                        if _HERE not in sys.path:
+                            sys.path.insert(0, _HERE)
+                        from v110_components import place_pool_v110
+                        pool_gain_log = []
+                        tmap, pool_st = place_pool_v110(
+                            pool_b, b_full, info_b, image_maps, actual, w_full, ti_f,
+                            veto_mask, pick=make_cos_pick("soft"), commit_hook=hook,
+                            cos_min=float(args.pool_cos), k=int(args.pool_k),
+                            n_max=(min(int(args.pool_nmax), 5) if args.pool_mode == "light-order"
+                                   else int(args.pool_nmax)),
+                            gain_band=float(args.pool_gain),
+                            gain_log=pool_gain_log,
+                            spatial_frac=float(args.pool_spatial),
+                            hits_of=(lambda _l: np.flatnonzero(labels_global == int(_l))),
+                            xyz=(np.stack([np.asarray(fs.event.x, np.float64),
+                                           np.asarray(fs.event.y, np.float64),
+                                           np.asarray(fs.event.z, np.float64)], 1)
+                                 if args.pool_spatial > 0 else None),
+                            labels=labels_global,
+                            preplaced={int(_l): float(info_b[_l]["t0"])
+                                       for _l in showers_b + multi_b + fixed_extra},
+                            truth_fn=_label_truth,
+                            search=("ordering" if args.pool_mode == "light-order" else "combination"),
+                            joint_min=int(args.pool_joint_min),
+                            commit_min=float(args.pool_commit_min))
+                    else:
+                        tmap, pool_st = place_pool_v02(pool_b, 0.60, b_full, info_b, image_maps,
+                                                       actual, w_full, ti_f,
+                                                       pick=make_cos_pick("soft"), commit_hook=hook)
                     n_swp = swap_pass(tmap, b_full, info_b, image_maps, actual, w_full, ti_f)
                     nfp, nrp = rescue_pass(tmap, b_full, info_b, image_maps, actual, w_full,
                                            veto_mask, ti_f, sup_fn=gate_sup)
@@ -1173,6 +1257,22 @@ def main() -> int:
                     "rescue_pass_flagged": int(nfp),
                     "rescue_pass_moved": int(nrp),
                     "time_s": round(float(pool_st.get("time_s", 0.0)), 2)}
+                if args.pool_mode in ("light", "light-order"):
+                    for _k in ("n_components", "n_edges", "comp_size_hist", "n_chunked",
+                               "n_uncommitted", "e_uncommitted",
+                               "n_rejected", "n_gained", "gain_med", "gain_p16", "gain_p84",
+                               "gain_frac_at_edge", "n_exact_checks", "t_search",
+                               "n_multi_batches"):
+                        if _k in pool_st:
+                            pool_stats[_k] = pool_st[_k]
+                    pool_stats["mode"] = args.pool_mode
+                    pool_stats["chunk_audit"] = pool_st.get("chunk_audit", [])
+                if args.pool_gain > 0:
+                    _pg = [v for d in p1_gain_log for v in d["gains"].values()]
+                    pool_stats["p1_gain"] = {"n": len(p1_gain_log),
+                                             "med": float(np.median(_pg)) if _pg else None,
+                                             "p16": float(np.percentile(_pg, 16)) if _pg else None,
+                                             "p84": float(np.percentile(_pg, 84)) if _pg else None}
                 np.asarray(fs.track_stage.base_image)[:] = b_full.astype(np.float32)
 
             police_fn = None
@@ -2191,6 +2291,25 @@ def main() -> int:
                     p3_row["pass2_audit"] = audit_p2
                     tim["after_pass2"] = time.time() - t_ev
                     _evo("3.95_pass2_trade", ns1["hit_timestamps"])
+                if args.redecide:
+                    # ---------- STAGE 3.98 (v1.1): component re-decision ----------
+                    if _HERE not in sys.path:
+                        sys.path.insert(0, _HERE)
+                    from v110_redecide import run_redecide
+                    from v02_refine_pipeline import make_cos_pick as _mcp_rd
+
+                    def _ti_rd(arr, t):
+                        return timeinterpolation(arr, shift=float(t), baseline=0).astype(np.float64)
+                    st_rd = run_redecide(
+                        ns1, veto_mask=veto_mask, support_cache=support_cache,
+                        label_info=label_info, ti=_ti_rd, pick=_mcp_rd("soft"),
+                        e_min=float(args.redecide_emin), cos_min=float(args.pool_cos),
+                        k=int(args.pool_k), n_max=int(args.pool_nmax),
+                        truth_fn=_label_truth, spatial_frac=float(args.pool_spatial))
+                    p3_row["redecide_audit"] = st_rd.pop("audit", [])
+                    p3_row["redecide"] = st_rd
+                    tim["after_redecide"] = time.time() - t_ev
+                    _evo("3.98_redecide", ns1["hit_timestamps"])
                 if args.pass3_family and args.loop_p23 == 0:
                     if _HERE not in sys.path:
                         sys.path.insert(0, _HERE)

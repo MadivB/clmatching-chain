@@ -33,9 +33,11 @@ coverage; **all-TPC** = every TPC. 126-event reference sample = files
 | v0.10.6 | 09-04 | 96.50 | 95.65 | low-E simplification: KD-tree force (11.8->0.3 s) + 25cm isolation veto (refuses 0.04% hits) + LE-ranker stage DELETED (5.0->0 s); eff -0.006 pp; ~50 s/ev/GPU; run_v0106.sh |
 | v0.10.7 | 09-04 | 96.50 | 95.65 | fast-scan ADOPTED (rank-1 row-split collapse, 6834 calls/ev at 100% fast, bit-identical; backbone 19.7->16.3); TF32 null; 55.0 s/ev/GPU broad accounting (was 64.8); run_v0107.sh |
 | **v1.0** | 09-04 | 96.50 | 95.65 | **FIRST RELEASE** = v0.10.7 chain + vote10 confidence: continuous t0s + sigma_t + zero-parameter data-only hit_t0_conf (out-of-sample AUC 0.777/0.936 E-wt), 25cm isolation veto, 55.0 s/ev/GPU; run_v1.sh |
+| **v1.1** | 09-22 | +0.26‡ | +0.17‡ | light-coupled component pool (exact combination search, 20 MeV floor) + stage 3.98 component re-decision (>= 20 MeV) + 0.5 MeV prediction floor in non-shower TPCs; 5-file cert 63 ev: NS 96.44->96.70 (52/11), all-TPC 95.37->95.54 (46/17), LE 57.9->61.0; +5 % time; run_v11.sh |
 
 \* 39-event sample, pre length-gate fix — not comparable to later numbers.
 † file-0000001 same-node pair; 126-ev v0.8.6 row is the certified one.
+‡ v1.1 certified on files 0000001-0000005 (63 events, paired vs the v1.0 outputs of the same events; user: 5 files suffice for ND validation); deltas are vs v1.0 on those events.
 
 **2026-08-15 chain-wide corrections (no version bump):** (1) t0 search
 window 700/800 → **895** everywhere (user correction; upper edge = 1000
@@ -212,3 +214,80 @@ confidence product for neutron ToF selection.
 9. The per-cluster-render SUM is not additive: +3 % median / ×1.65 p90 on
    bright channels, ×2 on far dim channels. Gates must read support
    channels; superposition-consistency is a Charge2Light training item.
+
+
+## v1.1 (2026-09-22): light-coupled component placement, re-decision, 0.5 MeV templates  *(user's "more permutations" direction)*
+
+User brief: better assignment under a constrained budget, data-driven (few
+thresholds, no MC reverse-engineering), physically sound; core idea = more
+placement combinations against the light loss.  Full record: V110_DESIGN.md.
+
+Census first (v1.0 dumps, 39 ev): no flash finder exists (slots come only from
+cluster self-placement); the undiscovered-flash pot is 13.7 % of wrong energy
+but light-visible only to 0.1 pp; 52 % of wrong energy sits under residual
+deficits at EXISTING families (a member placed elsewhere); wrong clusters have
+a different-interaction light twin (cos > 0.8) 75-93 % of the time while the
+energy-banded pool co-decides the pair 0-38 %; correct families are under-
+predicted 2-10 % and wrong clusters at a bigger correct cluster's time fill
+exactly that deficit (piggyback, 32 % of wrong E).
+
+Adopted (tag CLMatching_v1.1, launcher run_v11.sh = v1.0 flags +
+`--pool-mode light --p2-threshold 20 --redecide --redecide-emin 20
+--predict-min-energy 0.5 --predict-min-energy-shower 1.5`):
+1. **Stage 3.1 light-coupled components** (testing/v110_components.py):
+   batches = connected components of the pattern-cosine graph (>= 0.8 on a
+   shared TPC) instead of energy bands; each chunk (<= 8) decided by an EXACT
+   combination search on the pairwise-quadratic loss (k = 6 candidate minima
+   per member + the greedy path; top-8 re-scored with the clipped loss).
+   Accuracy-neutral alone (twin swaps are degenerate at the template-
+   systematic level) but 42 % less pool time (scans 4867 -> 319/ev).
+2. **Pool floor 20 MeV** = the light-information boundary (k* crossing):
+   20-30 MeV single-TPC clusters join the component search.  (10 MeV gives
+   more all-TPC but loses 0.7 GeV in the light-weak 5-20 MeV band.)
+3. **Stage 3.98 component re-decision** (testing/v110_redecide.py): after
+   pass2, components of PLACED clusters >= 20 MeV in non-shower TPCs are
+   re-decided jointly on the leave-component-out base; the winner must beat
+   the incumbent's exact loss; singletons untouched.  1.3 s/ev, ~12 moves/ev,
+   truth-scored +2 GeV/39 ev (58 fixes / 32 breaks).  At >= 5 MeV the same
+   stage LOSES 3 GeV in 5-20 MeV: the light-weak band must not be re-decided
+   by light (standing lesson, now re-measured).
+4. **0.5 MeV prediction floor in non-shower TPCs** (M5p1 PredictionConfig.
+   min_cluster_energy_shower_tpc_mev = 1.5): 0.5-1.5 MeV clusters get light
+   templates and go to the tail solver instead of nearest-hit force placement
+   - the "small peaks" population.  Alone: NS +0.15 (36/3), LE 58 -> 61;
+   shower TPCs gain nothing from it, so they keep 1.5 MeV (matrix stage back
+   to 16 s).
+
+Measured NULL / NEGATIVE (all flag-gated off, do not re-test):
+- amplitude profiling at commit (`--pool-gain`): gains pile at the +25 % edge
+  (steals unplaced co-timed light), NS -0.11..-0.17, three arms;
+- charge-contact prior for big clusters (`--pool-spatial`): 99 % of correct
+  clusters' disagreeing 3-cm contacts are genuine cross-interaction contacts
+  (47 GeV at risk vs 3.9 GeV fixable) - the v0.7 certificate holds for the
+  disconnected tail only; not run in-chain;
+- ordering search on component batches (batching rule alone): wash;
+- participate-but-do-not-commit hybrid (`--pool-commit-min`): negative and slow;
+- 5 / 10 MeV pool floors: more all-TPC, but the light-weak band pays;
+- the in-component greedy path is a strawman (joint beats it by +8 GeV per
+  33 ev yet end-to-end is flat): only end-to-end ledgers count.
+
+Ledger (paired vs v1.0 on the same events; chain deterministic - a v1.0 rerun
+is bit-identical):
+
+| arm (39 ev, files 1-3) | NS | all-TPC | events NS b/w |
+|---|---|---|---|
+| B light components | +0.03 | -0.03 | 23/16 |
+| D2 + floor 10 | +0.07 | +0.08 | 22/17 |
+| F20 + redecide 20 | +0.14 | +0.05 | 26/13 |
+| K0 light + predict 0.5/1.5sh | +0.15 | +0.05 | 36/3 |
+| **K1 = v1.1** | **+0.29** | **+0.15** | **33/6** |
+| K2 (floor 10) | +0.24 | +0.19 | 33/6 |
+| **v1.1 CERT files 1-5, 63 ev** | **+0.26 (96.44->96.70)** | **+0.17 (95.37->95.54)** | **52/11 (all-TPC 46/17)** |
+
+Time: 110 -> 116 s/ev/worker (+5 %; stage 1 +6 s for the extra templates,
+pool -5 s, re-decision +1.3 s).  Confidence output unchanged (pcu_vote10).
+Tooling: testing/v11_ab.py (paired ledger, multi-dir reference), v11_hitflips.py,
+v11_flips.py, v11_chunk_audit.py, v11_census.py, v11_contact_potential.py,
+run_v11arm.sh / run_v11cert.sh (files 1-3 / 1-5 runners).
+Next (user): v1.2 = v1.1 + the 2x2 per-hit precision-timing module
+(/pscratch/sd/y/yuxuan/2x2QLMatching/V2Design/ND_HANDOFF.md).
