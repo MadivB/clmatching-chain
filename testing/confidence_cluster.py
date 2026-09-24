@@ -18,17 +18,22 @@ hits grouped by (label, TPC) with a single argsort (no per-label masks).
 from __future__ import annotations
 import numpy as np
 
-CLIP, GAIN, PEAK = 60780.0, 200.0, 105
+from sat_clip import ceiling_rows, clip_scalar, LEGACY_CLIP
+
+GAIN, PEAK = 200.0, 105
+CLIP = LEGACY_CLIP   # legacy constant; math goes through sat_clip
 FWIN, SEP, DIL = 4, 20, 3
 YLO, YHI, NROW = -215.5, 81.7, 60
 
 
-def standardized_residual(actual_tpc, base_tpc):
+def standardized_residual(actual_tpc, base_tpc, tpc=None):
     """Unit-variance, saturation-zeroed, +-FWIN-windowed residual for ONE TPC.
-    float32 throughout, no boolean-index copies (bandwidth-bound kernel)."""
+    float32 throughout, no boolean-index copies (bandwidth-bound kernel).
+    tpc = light-TPC index -> per-channel saturation ceiling from sat_clip (scalar fallback)."""
     A = np.asarray(actual_tpc, np.float32)
-    P = np.minimum(np.asarray(base_tpc, np.float32), np.float32(CLIP))
-    ok = (A < np.float32(0.98 * CLIP)).astype(np.float32)   # 1 = usable cell
+    ceil = ceiling_rows(tpc) if tpc is not None else clip_scalar()   # (n_ch, 1) or scalar
+    P = np.minimum(np.asarray(base_tpc, np.float32), np.asarray(ceil, np.float32))
+    ok = (A < np.asarray(0.98 * ceil, np.float32)).astype(np.float32)   # 1 = usable cell
     Pm = P * ok
     alpha = float((Pm * A).sum() / max(float((Pm * P).sum()), 1e-9))
     r = (A - np.float32(alpha) * P)
@@ -86,7 +91,7 @@ def cluster_scores(labels, hit_tpc, hit_y, hit_e, ts, actual, base, min_hits=3, 
             if not (0 <= tick < n_tick):
                 continue
             if c not in RW:
-                RW[c] = standardized_residual(actual[c], base[c])
+                RW[c] = standardized_residual(actual[c], base[c], tpc=c)
             v0 = RW[c][ch, tick]
             curve += v0 @ RW[c][ch]
             own.append(v0); N += len(ch)

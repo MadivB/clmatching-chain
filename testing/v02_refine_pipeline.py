@@ -37,8 +37,9 @@ sys.path.insert(3, _HERE)
 
 import numpy as np
 
-from v02_ordering_pipeline import (PEAK, GAIN, CLIP, SEARCH, CUT, weighted_scan, acc_sums,
+from v02_ordering_pipeline import (PEAK, GAIN, SEARCH, CUT, weighted_scan, acc_sums,
                                    scan_label, add_label, place_pool_v02)
+from sat_clip import clip_rows, clip_col
 
 # v0.5.0 switchable loss (kept in lockstep with v02_ordering_pipeline)
 LOSS_MODE = "chi2"
@@ -114,7 +115,7 @@ def trigger_fired(lab, t0, baseA, info, image_maps, actual, veto_mask, ti,
                 msup[np.asarray(ch_sup, dtype=int)] = True
                 fin = fin & msup
         a = actual[c][:, tick]
-        p = np.minimum(baseA[c][:, tick], CLIP)
+        p = clip_col(baseA[c][:, tick], c)
         ex = p - a
         z = ex / np.sqrt(GAIN * np.maximum(a, 100.0))
         zz = np.sort(z[fin & (ex >= EXCESS_GATE)])[::-1]
@@ -192,7 +193,7 @@ def swap_pass(tmap, baseA, info, image_maps, actual, w_full, ti, max_sweeps=3):
                                                 LOSS_MODE)
                     else:
                         tot += float(np.sum(w_full[c][ch]
-                                            * (np.minimum(m, CLIP) - actual[c][ch]) ** 2))
+                                            * (clip_rows(m, c, ch) - actual[c][ch]) ** 2))
                 return abs(tot) if use_signed else tot
 
             if pl(t_j, t_i) < pl(t_i, t_j) - 1e-9:

@@ -1,4 +1,6 @@
 #!/bin/bash
+# v1.2.2: light saturation ceiling = int16 rail (2**15-1) minus the per-channel dynamic baseline,
+#   computed per event in the first stage and used by every clip / veto (was the constant 60780).
 # v1.2 canonical charge-light matching = v1.1 chain (run_v11.sh) + stage P per-hit precision timing:
 #   --precision --precision-calib testing/v120_calib_lowi.json --precision-rounds 3 --precision-pieces
 #   (v1.2.1: displaced pieces >= 5 MeV with their own channels get a free time; per-piece delay / distance /

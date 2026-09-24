@@ -28,8 +28,9 @@ for p in (_HERE, os.path.join(_HERE, "..", "CLMatching_AlphaRelease"),
     if ap not in sys.path:
         sys.path.append(ap)
 from pulse_shapes import timeinterpolation  # noqa: E402
+from sat_clip import clip_rows, ceiling, ceiling_rows, LEGACY_CLIP  # noqa: E402
 
-CLIP = 60780.0
+CLIP = LEGACY_CLIP   # legacy constant; math goes through sat_clip
 GAIN = 200.0
 PEAK = 105
 MIN_SEP = 20      # a swap pair's part-t0s must differ by > this (distinct flashes)
@@ -97,16 +98,16 @@ def run_swap_correction(ns: dict[str, Any], *,
         act = actual[c]
         bw = base[c] - timeinterpolation(PA, shift=tA, baseline=0) - timeinterpolation(PB, shift=tB, baseline=0)
         pred = np.clip(bw + timeinterpolation(PA, shift=aAt, baseline=0)
-                       + timeinterpolation(PB, shift=aBt, baseline=0), 0.0, CLIP)
+                       + timeinterpolation(PB, shift=aBt, baseline=0), 0.0, ceiling_rows(c))
         supp = _supp[(A, c)] | _supp[(B, c)]
         lo = max(0, int(round(min(tA, tB))) + WIN_LO)
         hi = min(n_tick, int(round(max(tA, tB))) + WIN_HI)
         if not supp.any() or hi <= lo:
             return 0.0
         a = act[np.ix_(supp, np.arange(lo, hi))]
-        pr = np.minimum(pred[np.ix_(supp, np.arange(lo, hi))], CLIP)
+        pr = clip_rows(pred[np.ix_(supp, np.arange(lo, hi))], c, supp)
         v = GAIN * np.maximum(a, 100.0)
-        m = a < 0.98 * CLIP
+        m = a < 0.98 * ceiling_rows(c, supp)
         return float((((pr - a) ** 2 / v)[m]).sum())
 
     # spatial gate: the shape-normalized per-channel cosine is immune to the ML
@@ -119,7 +120,7 @@ def run_swap_correction(ns: dict[str, Any], *,
         if k not in _fpc:
             a = actual[c]; t = int(round(t0)) + PEAK
             col = a[:, max(0, t - 4):min(n_tick, t + 5)]
-            _fpc[k] = (col.sum(1), col.max(1) >= 0.98 * CLIP)
+            _fpc[k] = (col.sum(1), col.max(1) >= 0.98 * ceiling(c))
         return _fpc[k]
     def _cos(u, v, m):
         u = u[~m]; v = v[~m]; nu = np.linalg.norm(u); nv = np.linalg.norm(v)

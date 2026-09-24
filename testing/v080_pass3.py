@@ -14,6 +14,7 @@ import numpy as np
 
 from spatial_score import emedian
 from v030_expansion import GAIN, SEARCH, _shift, weighted_scan
+from sat_clip import ceiling
 
 CUT = 10.0
 
@@ -178,9 +179,9 @@ def run_pass3_family_light(ns: dict[str, Any], *,
             w = w_all[c][ch]
             a = actual[c][ch]
             l_cur += float(np.sum(w * (np.minimum(
-                b0 + si_cur.get((c, ch), 0.0) + sj_cur.get((c, ch), 0.0), 60780.0) - a) ** 2))
+                b0 + si_cur.get((c, ch), 0.0) + sj_cur.get((c, ch), 0.0), ceiling(c, ch)) - a) ** 2))
             l_new += float(np.sum(w * (np.minimum(
-                b0 + si_new.get((c, ch), 0.0) + sj_new.get((c, ch), 0.0), 60780.0) - a) ** 2))
+                b0 + si_new.get((c, ch), 0.0) + sj_new.get((c, ch), 0.0), ceiling(c, ch)) - a) ** 2))
         if l_new < swap_ratio * l_cur:
             tri, trj = truth_of(fi["mem"]), truth_of(fj["mem"])
             wi = tri is not None and abs(ti0 - tri) <= CUT

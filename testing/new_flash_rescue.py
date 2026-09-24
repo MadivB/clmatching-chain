@@ -35,8 +35,10 @@ for p in (_HERE, os.path.join(_HERE, "..", "CLMatching_AlphaRelease"),
     if ap not in sys.path:
         sys.path.append(ap)
 from pulse_shapes import timeinterpolation  # noqa: E402
+from sat_clip import ceiling_rows, LEGACY_CLIP  # noqa: E402
 
-CLIP, GAIN, PEAK = 60780.0, 200.0, 105
+GAIN, PEAK = 200.0, 105
+CLIP = LEGACY_CLIP   # legacy constant; math goes through sat_clip
 FWIN = 4
 
 
@@ -113,7 +115,7 @@ def run_new_flash_rescue(ns: dict[str, Any], *, hit_tpc: np.ndarray,
         D = Ex = A = 0.0; ncell = 0
         for c, (ch, _P) in blobs[L]["sup"].items():
             Aw = actual[c][ch][:, lo:hi]
-            Bw = np.clip(base[c][ch][:, lo:hi], 0.0, CLIP)
+            Bw = np.clip(base[c][ch][:, lo:hi], 0.0, ceiling_rows(c, ch))
             R = Aw - Bw
             D += float(np.maximum(R, 0).sum()); Ex += float(np.maximum(-R, 0).sum())
             A += float(Aw.sum()); ncell += R.size
@@ -129,7 +131,7 @@ def run_new_flash_rescue(ns: dict[str, Any], *, hit_tpc: np.ndarray,
             pk = int(np.argmax(P[ch].sum(0)))
             plo, phi = max(0, pk - FWIN), min(n_tick, pk + FWIN + 1)
             tv.append(P[ch][:, plo:phi].sum(1))                     # template profile
-            R = actual[c][ch][:, lo:hi] - np.clip(base[c][ch][:, lo:hi], 0.0, CLIP)
+            R = actual[c][ch][:, lo:hi] - np.clip(base[c][ch][:, lo:hi], 0.0, ceiling_rows(c, ch))
             dv.append(np.maximum(R, 0).sum(1))                      # deficit profile
         t = np.concatenate(tv); d = np.concatenate(dv)
         nt = np.linalg.norm(t); nd = np.linalg.norm(d)
@@ -145,8 +147,8 @@ def run_new_flash_rescue(ns: dict[str, Any], *, hit_tpc: np.ndarray,
             own = timeinterpolation(P, shift=t0, baseline=0)[ch][:, lo:hi]
             B = base[c][ch][:, lo:hi]; A = actual[c][ch][:, lo:hi]
             w = 1.0 / (GAIN * np.maximum(A, 100.0))
-            gain += float(np.sum(w * ((np.clip(B - own, 0.0, CLIP) - A) ** 2
-                                      - (np.clip(B, 0.0, CLIP) - A) ** 2)))
+            gain += float(np.sum(w * ((np.clip(B - own, 0.0, ceiling_rows(c, ch)) - A) ** 2
+                                      - (np.clip(B, 0.0, ceiling_rows(c, ch)) - A) ** 2)))
             own_pow += float(np.sum(w * own ** 2))
         return gain, own_pow
 
@@ -155,8 +157,8 @@ def run_new_flash_rescue(ns: dict[str, Any], *, hit_tpc: np.ndarray,
         tot = 0.0
         for c, (ch, P) in blobs[L]["sup"].items():
             bw = base[c] - timeinterpolation(P, shift=t_from, baseline=0)
-            new = np.clip(bw + timeinterpolation(P, shift=t_to, baseline=0), 0.0, CLIP)
-            cur = np.clip(base[c], 0.0, CLIP)
+            new = np.clip(bw + timeinterpolation(P, shift=t_to, baseline=0), 0.0, ceiling_rows(c))
+            cur = np.clip(base[c], 0.0, ceiling_rows(c))
             lo = max(0, int(round(min(t_from, t_to))) + PEAK - 30)
             hi = min(n_tick, int(round(max(t_from, t_to))) + PEAK + 60)
             A = actual[c][np.ix_(ch, np.arange(lo, hi))]

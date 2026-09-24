@@ -28,10 +28,11 @@ from typing import Any, Callable, Optional
 import numpy as np
 
 from v030_expansion import build_hit_graph, family_geodesics, weighted_scan
+from sat_clip import clip_rows, LEGACY_CLIP
 
 PEAK = 105
 GAIN = 200.0
-CLIP = 60780.0
+CLIP = LEGACY_CLIP   # legacy constant; math goes through sat_clip
 SEARCH = 895
 
 
@@ -194,8 +195,8 @@ def run_shower_tpc_pass(ns: dict[str, Any], *, hit_tpc: np.ndarray,
                     sup = parts[l]["sup"]
                     sh = _shift(parts[l]["img"], t_star, n_ticks)
                     without = Bt - sh
-                    d_now = float(np.sum(W[sup] * (np.minimum(Bt[sup], CLIP) - A[sup]) ** 2))
-                    d_wo = float(np.sum(W[sup] * (np.minimum(without[sup], CLIP) - A[sup]) ** 2))
+                    d_now = float(np.sum(W[sup] * (clip_rows(Bt[sup], t, sup) - A[sup]) ** 2))
+                    d_wo = float(np.sum(W[sup] * (clip_rows(without[sup], t, sup) - A[sup]) ** 2))
                     curve = weighted_scan(parts[l]["img"][sup], (without - A)[sup], W[sup])
                     t_alt = int(np.argmin(curve))
                     gain_alt = float(curve[t_star] - curve[t_alt])
@@ -215,9 +216,9 @@ def run_shower_tpc_pass(ns: dict[str, Any], *, hit_tpc: np.ndarray,
                     sup = parts[l]["sup"]
                     old = _shift(parts[l]["img"], assign[l], n_ticks)
                     new = _shift(parts[l]["img"], t_star, n_ticks)
-                    d_now = float(np.sum(W[sup] * (np.minimum(Bt[sup], CLIP) - A[sup]) ** 2))
+                    d_now = float(np.sum(W[sup] * (clip_rows(Bt[sup], t, sup) - A[sup]) ** 2))
                     Bt2 = Bt - old + new
-                    d_new = float(np.sum(W[sup] * (np.minimum(Bt2[sup], CLIP) - A[sup]) ** 2))
+                    d_new = float(np.sum(W[sup] * (clip_rows(Bt2[sup], t, sup) - A[sup]) ** 2))
                     if d_new < d_now:
                         Bt = Bt2
                         assign[l] = float(t_star)

@@ -63,6 +63,12 @@ sys.path.insert(3, _HERE)
 import numpy as np
 from scipy.signal import fftconvolve
 
+# v1.2.2: per-event, per-channel light saturation ceiling (int16 rail minus the dynamic
+# baseline); registered once per event after the first stage, used by every clip below and
+# by the testing-side stage modules.  CLIP stays only as the legacy fallback.
+import sat_clip as _sat_clip
+from sat_clip import clip_rows, clip_col
+
 # checkpoint-key -> canonical stage id (see stage structure in the docstring)
 STAGE_CHECKPOINTS = [
     ("first_stage", "1_clustering_prediction"),
@@ -77,6 +83,7 @@ STAGE_CHECKPOINTS = [
     ("after_pass2", "3.95_pass2_trade"),
     ("after_pass3f", "3.97_pass3_family"),
     ("after_redecide", "3.98_redecide"),
+    ("after_v200", "3.99_v200_blocks"),
     ("after_swap_fix", "4.5_swap_fix"),
     ("after_force", "4.9_force_coverage"),
     ("after_precision", "7_precision"),
@@ -290,7 +297,7 @@ def make_police(actual, veto_mask, e_pos, support_cache, label_info, ti_fn,
         for c in tpcs:
             fin = ~veto_mask[c]
             a = actual[c][:, tick]
-            p = np.minimum(np.asarray(bi[c], np.float64)[:, tick], CLIP)
+            p = clip_col(np.asarray(bi[c], np.float64)[:, tick], c)
             ex = p - a
             z = ex / np.sqrt(GAIN * np.maximum(a, 100.0))
             if mode == "top18":
@@ -364,7 +371,7 @@ def make_police(actual, veto_mask, e_pos, support_cache, label_info, ti_fn,
                     mdl = (np.asarray(bi[c], np.float64)[ch]
                            + ti_fn(np.asarray(image_maps[(int(lab), int(c))], np.float64), t)[ch])
                     tot += float(np.sum(w_all[c][ch]
-                                        * (np.minimum(mdl, CLIP) - actual[c][ch]) ** 2))
+                                        * (clip_rows(mdl, c, ch) - actual[c][ch]) ** 2))
                 return tot
 
             action, t_new = min(cands, key=lambda kv: uloss(kv[1]))
@@ -539,6 +546,9 @@ def main() -> int:
                          "never touched; shower TPCs excluded)")
     ap.add_argument("--redecide-emin", type=float, default=5.0,
                     help="v1.1 re-decision participant floor [MeV]")
+    ap.add_argument("--v200-min-e", type=float, default=None,
+                    help="v2.0 test: stage 3.99 exact-block LNS re-solve of clusters >= E [MeV] (testing/v200)")
+    ap.add_argument("--v200-sweeps", type=int, default=3)
     ap.add_argument("--fast-scan", action="store_true",
                     help="rank-1 scan fast path: collapse multi-channel FFT "
                          "scans to one 1-D template correlation (exact - "
@@ -923,6 +933,13 @@ def main() -> int:
             tpc_to_clusters = fs.prediction.tpc_to_clusters
             support_cache = fs.prediction.cluster_channel_support_cache
             veto_mask = np.asarray(fs.prediction.saturated_channel_cache["veto_mask"], dtype=bool)
+            # v1.2.2: per-channel saturation ceiling = int16 rail (2**15-1) minus the dynamic
+            # baseline, built with the waveform in the first stage; every clip below and in the
+            # testing-side stages (through sat_clip) uses it instead of the constant CLIP.
+            sat_ceil = fs.prediction.saturated_channel_cache.get("ceiling")
+            sat_ceil = (np.full(veto_mask.shape, CLIP, dtype=np.float32) if sat_ceil is None
+                        else np.asarray(sat_ceil, dtype=np.float32))
+            _sat_clip.set_ceiling(sat_ceil)
             actual = np.asarray(fs.event.full_light_waveform, dtype=np.float64)
             n_light, n_ch, n_ticks = actual.shape
             hit_t0 = np.asarray(fs.track_stage.hit_t0)
@@ -1410,7 +1427,7 @@ def main() -> int:
                 for ti, c in enumerate(L["tpcs"]):
                     fin = ~veto_mask[c]
                     a = actual[c, :, tick]
-                    p = np.minimum(base[c, :, tick], CLIP)
+                    p = clip_col(base[c, :, tick], c)
                     ex = p - a
                     z = ex / np.sqrt(var_all[c, :, tick])
                     zz = np.sort(z[fin & (ex >= EXCESS_GATE)])[::-1]
@@ -1481,7 +1498,7 @@ def main() -> int:
                         for ti, c in enumerate(J["tpcs"]):
                             if c in union:
                                 model[c] += sh[ti][union[c]]
-                    return float(sum(np.sum(w_union[c] * (np.minimum(model[c], CLIP) - actual[c][union[c]]) ** 2)
+                    return float(sum(np.sum(w_union[c] * (clip_rows(model[c], c, union[c]) - actual[c][union[c]]) ** 2)
                                      for c in union))
 
                 best = None
@@ -1545,7 +1562,7 @@ def main() -> int:
                 for c in K["tpcs"]:
                     fin = ~veto_mask[c]
                     a = actual[c, :, tick]
-                    p = np.minimum(base[c, :, tick], CLIP)
+                    p = clip_col(base[c, :, tick], c)
                     ex = p - a
                     z = ex / np.sqrt(var_all[c, :, tick])
                     zz = np.sort(z[fin & (ex >= EXCESS_GATE)])[::-1]
@@ -1578,7 +1595,7 @@ def main() -> int:
                     if abs(t1 - info[j]["t0"]) <= CUT:
                         continue
                     sh_t1 = timeinterpolation(P, shift=t1, baseline=0).astype(np.float64)
-                    lm = float(np.sum(w_f * (np.minimum((b_wo + sh_t1)[ch_u], CLIP)
+                    lm = float(np.sum(w_f * (clip_rows((b_wo + sh_t1)[ch_u], tpc_f, ch_u)
                                              - actual[tpc_f][ch_u]) ** 2))
                     movers.append((lm, int(j)))
                 if movers:
@@ -1612,7 +1629,7 @@ def main() -> int:
                     tot = 0.0
                     for c, ch in union.items():
                         m = base_wo[c][ch] + parts.get(c, 0.0)
-                        tot += float(np.sum(w_u[c] * (np.minimum(m, CLIP) - actual[c][ch]) ** 2))
+                        tot += float(np.sum(w_u[c] * (clip_rows(m, c, ch) - actual[c][ch]) ** 2))
                     return tot
 
                 def contrib(label_stk, tpc_list, t0v, into=None):
@@ -1816,7 +1833,7 @@ def main() -> int:
                                 if c in p:
                                     mdl += p[c]
                             tot += float(np.sum((1.0 / (GAIN * np.maximum(actual[c][ch], 100.0)))
-                                                * (np.minimum(mdl, CLIP) - actual[c][ch]) ** 2))
+                                                * (clip_rows(mdl, c, ch) - actual[c][ch]) ** 2))
                         return tot
 
                     labs_sorted = sorted(cur)
@@ -2142,7 +2159,7 @@ def main() -> int:
                         positive_row_margin=-1e-4,
                         matrix_worsen_tolerance_norm=0.15,
                         search_range=SEARCH,
-                        adc_clip=CLIP,
+                        adc_clip=sat_ceil,
                         collect_scan_losses=False,
                         full_scan_assign_eps=-20000,
                         backward_peak_align_ticks=5,
@@ -2199,7 +2216,7 @@ def main() -> int:
                                 positive_row_margin=-1e-4,
                                 matrix_worsen_tolerance_norm=float(args.matrix_relax_tol),
                                 search_range=SEARCH,
-                                adc_clip=CLIP,
+                                adc_clip=sat_ceil,
                                 collect_scan_losses=False,
                                 full_scan_assign_eps=float(args.matrix_relax_eps),
                                 backward_peak_align_ticks=5,
@@ -2324,6 +2341,28 @@ def main() -> int:
                     p3_row["redecide"] = st_rd
                     tim["after_redecide"] = time.time() - t_ev
                     _evo("3.98_redecide", ns1["hit_timestamps"])
+                if args.v200_min_e is not None:
+                    # ---------- STAGE 3.99 (v2.0 test): exact-block LNS re-solve of clusters >= E ----------
+                    # (V200_DESIGN.md) warm start from the current assignment; clusters below the floor
+                    # stay frozen and only shape the residual; light energy on the TPC channel unions.
+                    _v200_dir = os.path.join(_HERE, "v200")
+                    if _v200_dir not in sys.path:
+                        sys.path.insert(0, _v200_dir)
+                    os.environ.setdefault("V200_DOM", "3")
+                    from v200_stage import run_v200_stage
+
+                    def _ti_v2(arr, t):
+                        return timeinterpolation(arr, shift=float(t), baseline=0).astype(np.float64)
+                    st_v2 = run_v200_stage(ns1, veto_mask=veto_mask, sat_ceil=sat_ceil, ti=_ti_v2,
+                                           min_e=float(args.v200_min_e), sweeps=int(args.v200_sweeps),
+                                           truth_t0=truth_t0)
+                    p3_row["v200"] = st_v2
+                    print(f"  [3.99 v200] re-solved {st_v2['n_resolved']} clusters >= {args.v200_min_e} MeV: "
+                          f"{st_v2['n_changed']} moved ({st_v2['e_changed']:.0f} MeV), light E {st_v2['E_hist'][0]:.0f} -> "
+                          f"{st_v2['E_light_after']:.0f}, audit fixed/broke {st_v2.get('audit_fixed')}/{st_v2.get('audit_broke')}, "
+                          f"{st_v2['time_s']:.1f}s", flush=True)
+                    tim["after_v200"] = time.time() - t_ev
+                    _evo("3.99_v200_blocks", ns1["hit_timestamps"])
                 if args.pass3_family and args.loop_p23 == 0:
                     if _HERE not in sys.path:
                         sys.path.insert(0, _HERE)
@@ -2701,6 +2740,7 @@ def main() -> int:
                     tpc=hit_tpc, labels=labels_global, hit_refs=fs.event.hit_refs,
                     ts_final=ts_fin.astype(np.float64), ts_p1=hit_t0.astype(np.float64),
                     truth_t0=truth_t0, veto_mask=veto_mask,
+                    sat_ceiling=sat_ceil.astype(np.float32),
                     # FINAL predicted light (ns1['baseImage']): the matrix stage reassigns
                     # ns1['baseImage']=p3_base, so fs.track_stage.base_image is the STALE
                     # pre-phase3 snapshot (missing every expansion/matrix/force cluster) — do
@@ -2727,7 +2767,7 @@ def main() -> int:
                         if _mm.any() and float(_e[_mm].sum()) >= 10:
                             _placed.append(int(round(np.median(ts_fin[_mm]))) + 105)
                     conf_components[str(_c)] = _cl_components(
-                        actual[_c], _bimg[_c], _cl_t0(actual[_c], _placed))
+                        actual[_c], _bimg[_c], _cl_t0(actual[_c], _placed), tpc=int(_c))
             except Exception as _ce:
                 conf_components = {"error": repr(_ce)}
 

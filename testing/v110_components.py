@@ -42,8 +42,9 @@ import time
 import numpy as np
 
 import v02_ordering_pipeline as _vop
-from v02_ordering_pipeline import (CLIP, SEARCH, add_label, scan_label,
+from v02_ordering_pipeline import (SEARCH, add_label, scan_label,
                                    weighted_scan, _edge_penalty_vec)
+from sat_clip import clip_rows
 
 # ---- tunables (few, physical) ----
 COS_MIN = 0.80      # light-coupling edge: cosine of amplitude patterns on a shared TPC
@@ -460,7 +461,7 @@ def search_chunk(B, baseA, info, image_maps, actual, w_full, ti, pick,
         for (i, j) in contacts:
             if abs(cands[i][idx[i]] - cands[j][idx[j]]) <= SAME_T:
                 pen -= prior_e
-        return pen + float(sum(np.sum(w_u[c] * (np.minimum(sbx[c], CLIP) - act_u[c]) ** 2)
+        return pen + float(sum(np.sum(w_u[c] * (clip_rows(sbx[c], c, uch[c]) - act_u[c]) ** 2)
                                for c in uch))
 
     exact = [exact_loss(idx) for idx in combos]
@@ -514,7 +515,7 @@ def search_orderings(B, baseA, info, image_maps, actual, w_full, ti, pick, stats
     best, eloss, counters = [None], [None], [0, 0]
 
     def uloss(sb):
-        return float(sum(np.sum(w_u[c] * (np.minimum(sb[c], CLIP) - act_u[c]) ** 2) for c in uch))
+        return float(sum(np.sum(w_u[c] * (clip_rows(sb[c], c, uch[c]) - act_u[c]) ** 2) for c in uch))
 
     def dfs(remaining, sb, order, ts):
         if not remaining:

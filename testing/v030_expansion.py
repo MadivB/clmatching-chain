@@ -17,9 +17,11 @@ from scipy.sparse import coo_matrix
 from scipy.sparse.csgraph import dijkstra
 from scipy.spatial import cKDTree
 
+from sat_clip import clip_rows, clip_col, LEGACY_CLIP
+
 PEAK = 105
 GAIN = 200.0
-CLIP = 60780.0
+CLIP = LEGACY_CLIP   # legacy constant; math goes through sat_clip
 SEARCH = 895
 CUT = 10.0
 
@@ -288,8 +290,8 @@ def run_family_expansion(ns: dict[str, Any], *, verbose: bool = False,
             B = np.asarray(base[tc], np.float64)[ch]
             A = actual[tc][ch]
             W = w_all[tc][ch]
-            tot += float(np.sum(W * ((np.minimum(B + sh, CLIP) - A) ** 2
-                                     - (np.minimum(B, CLIP) - A) ** 2)))
+            tot += float(np.sum(W * ((clip_rows(B + sh, tc, ch) - A) ** 2
+                                     - (clip_rows(B, tc, ch) - A) ** 2)))
         if p["PLAIN_SCORE"]:
             return tot
         return tot / max(cands[c]["e"], 1e-9)
@@ -301,7 +303,7 @@ def run_family_expansion(ns: dict[str, Any], *, verbose: bool = False,
         for tc, ch in cands[c]["sup"].items():
             img = np.asarray(image_maps[(int(c), int(tc))], np.float64)
             own = _shift(img, f["t0"], n_ticks)[:, tick]
-            pcol = np.minimum(np.asarray(base[tc], np.float64)[:, tick] + own, CLIP)
+            pcol = clip_col(np.asarray(base[tc], np.float64)[:, tick] + own, tc)
             a = actual[tc][:, tick]
             ex = pcol - a
             z = ex / np.sqrt(GAIN * np.maximum(a, 100.0))
@@ -631,8 +633,8 @@ def force_full_coverage(ns: dict[str, Any], *, d_geo_family: float = 30.0,
                     B = np.asarray(base[tc], np.float64)[ch]
                     A = actual[tc][ch]
                     W = w_all[tc][ch]
-                    tot += float(np.sum(W * ((np.minimum(B + sh, CLIP) - A) ** 2
-                                             - (np.minimum(B, CLIP) - A) ** 2)))
+                    tot += float(np.sum(W * ((clip_rows(B + sh, tc, ch) - A) ** 2
+                                             - (clip_rows(B, tc, ch) - A) ** 2)))
                 return tot
             t_own, _g = _own_scan_best_abs(lab, sup, image_maps, base, actual, w_all)
             options = [(loss_at(t_own), t_own, "own")]

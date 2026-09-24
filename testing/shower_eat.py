@@ -17,9 +17,10 @@ import numpy as np
 from scipy.spatial import cKDTree
 
 from v030_expansion import _shift, weighted_scan
+from sat_clip import clip_col, LEGACY_CLIP
 
 PEAK = 105
-CLIP = 60780.0
+CLIP = LEGACY_CLIP   # legacy constant; math goes through sat_clip
 GAIN = 200.0
 CUT = 10.0
 P2_BOUND = 30.0
@@ -139,7 +140,7 @@ def run_shower_eat(*, seeds, b_full, hit_t0, image_maps, actual, w_full, ti,
             if not (0 <= tick < n_ticks):
                 continue
             a = actual[c][ch, tick]
-            b = np.minimum(b_full[c][ch, tick], CLIP)
+            b = clip_col(b_full[c][ch, tick], c, ch)
             m = a > 200.0
             num += float(np.minimum(b[m], a[m]).sum())
             den += float(a[m].sum())
@@ -231,7 +232,7 @@ def run_shower_eat(*, seeds, b_full, hit_t0, image_maps, actual, w_full, ti,
                 if not (0 <= tick < n_ticks) or not ch.size:
                     continue
                 a = actual[c][ch, tick]
-                p = np.minimum(b_full[c][ch, tick], CLIP)
+                p = clip_col(b_full[c][ch, tick], c, ch)
                 ex = p - a
                 z = ex / np.sqrt(GAIN * np.maximum(a, 100.0))
                 bad += int(((ex >= 500.0) & (z > 2.0)).sum())

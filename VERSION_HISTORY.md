@@ -390,3 +390,78 @@ time-of-flight delay is the difference of two family times (2.6 ns robust
 each); < 5 MeV deposits are light-blind and carry only their association time.
 Tools: v121_fragments.py, v121_piece_test.py, v121_piece_debug.py,
 v121_piece_eval.py, v121_slow_census.py, v121_bulk_check.py.
+
+### v1.2.2 (2026-09-23): light saturation ceiling = rail minus dynamic baseline  *(user: predicted pulses allowed above the saturated actual)*
+
+The light digitiser stores int16 samples: pedestal about -28000, rail 2**15-1 = 32767
+(the FLOW `clipped` flag is exactly "touches 32767").  The chain works on
+baseline-subtracted waveforms (raw minus the mean of the first 75 samples), so the rail
+in those units is `32767 - baseline`, per channel and per event (60765-60770 in this MC).
+Every stage hard-coded 60780 (about 100 sites: `adc_clip=60780`, `CLIP`, `ADC_CLIP`,
+`raw_clip=(0, 60780)`, and the veto `actual > 60700 for > N ticks`), and the displays drew
+the unclipped prediction, which is what showed up as orange above the flat blue top.
+Now one definition, `M5p1/light_saturation.py`: the first stage computes
+`sat_ceiling (n_tpc, 120) = 32767 - baseline` next to the formatted waveform
+(`EventData.sat_ceiling`, FLOW `clipped` kept as `EventData.light_clipped`), the
+saturation veto counts samples within 80 counts of that rail (same margin as before) and
+publishes the array as `saturated_channel_cache["ceiling"]`; every clip in the submodule
+takes `adc_clip` as scalar-or-array through `clip_hi / clip_hi_stack / clip_hi_full /
+stacked_row_ceiling`, the harness registers the array once per event in
+`testing/sat_clip.py` and all testing-side stages clip through `clip_rows / clip_col /
+ceiling`; the release entry (QLmatchingND -> v11_plotting_purpose_eval) computes the same
+ceiling per event; dumps carry `sat_ceiling`; demo_tpc_displays.py draws the prediction
+clipped at it (older dumps: rail channels reveal it as their maximum).  The constant
+survives only as `LEGACY_CLIP`, the fallback when no raw samples exist.  Old tags are not
+rewritten; run_v1.sh / run_v11.sh / run_v12.sh all pick the fix up through the shared code.
+Measured (file 0000001, 13 events, dumps in /pscratch/sd/y/yuxuan/v11arms/SAT1 vs the same
+code with CL_SAT_LEGACY=1 in SAT1_LEG): on every channel that touches the rail the actual
+maximum equals the new ceiling to 0.00 counts and the clipped prediction never exceeds the
+plateau; phase-1 times, veto masks and 12 of 13 events' final times are bit-identical
+(2.24 M hits within 0.5 tick), the stored base image differs by the 16-18 count clip level;
+in event 9 one light-degenerate twin pair in a saturated TPC (119 and 26 MeV clusters at
+249 / 288 ticks, 4 rail-touching channels still in the fit) swapped slots, -0.013 pp all-TPC
+over the file, NS +0.000.  The MC pedestal is flat, so the physics content of the change is
+for data (pedestal drifts, pre-trigger tails); against the v1.2.1 arm P2 the assignment is
+also identical to 0.01 pp (P2 predates the final v1.2.1 precision commit by 34 min, hence
+its sub-tick times differ).  Tools: testing/v122_sat_check.py, v122_ab_breakdown.py,
+sbatch_v122sat.sh (CL_SAT_LEGACY=1 for the A/B), demo_tpc_displays.py re-render in
+testing/v12_displays_v122/.
+
+### v2.0_test (2026-09-24): assignment as one energy, exact block search  *(user: light chi2 + beta neighbour prior, try combinations, break clusters, data-driven)*
+
+`testing/v200/` + V200_DESIGN.md.  One time per cluster; E = TPC-level Poisson chi2 of the
+whole light model (rail-clipped, v1.2.2 ceiling) + a contact Potts term with beta measured in
+situ; the light term is pairwise-quadratic, so blocks of <= 8 clusters are solved EXACTLY from
+k x k tables (q/r vectors, no GPU) inside large-neighbourhood sweeps with twin-swap kicks;
+candidate times = own residual-scan minima (new slots allowed for light-decidable clusters)
+plus the TPC slots.  Offline on the 39 dev dumps the solver goes far deeper in the light
+energy than the chain (33.7M vs 45.7M) but lands at 95.53 % vs 96.03 %: better above 20 MeV,
+worse below.  Measured cause: 17 % per-channel light-model systematics (in situ), small
+clusters' light 5-15 % of the ambient light, and the chi2 rewarding any small cluster that
+fills a big family's deficit; six regularisations (dominance, support channels, systematics
+weights, per-family gains with a 17 % prior, blind-to-nearest-family, residual-pattern cosine)
+do not repair it, and the in-situ beta table is selection-biased for small-big contacts
+(P(same) = 0.008 among decidable pairs) so it cannot be used.  What transfers: re-solve only
+clusters >= 20 MeV (cold re-initialised) with everything below frozen: offline +0.19 pp
+(27/11 events); floor scan W10 -0.03 / W50 +0.07 confirms 20 MeV.
+In-chain as stage 3.99 (`--v200-min-e 20`, after the v1.1 re-decision, +5 s/ev): files 1-3
+vs v1.2.1 arm P2: all-TPC 96.05 -> 96.24 (+0.19 pp, 27/11 events), NS +0.03, all three files
+up; >= 100 MeV wrong 1.46 -> 1.29 %, 20-100 MeV 8.16 -> 7.65 %, < 20 MeV unchanged.
+5-file certification (arm V2A5 vs CERT_P, 63 paired events): all-TPC 95.54 -> 95.76 (+0.22 pp, 42/20
+events better/worse), NS 96.70 -> 96.77 (+0.08, 35/25), all five files up (all-TPC +0.07/+0.29/+0.23/
++0.38/+0.14); >= 100 MeV wrong 1.91 -> 1.68 %, 20-100 MeV 8.62 -> 8.28 %, < 20 MeV and LE unchanged
+(60.95 -> 60.89); +5-12 s/ev for the stage.  Passes the 5-file standard; adoption = user's call
+(flag `--v200-min-e 20` in the launcher).  Outputs /pscratch/sd/y/yuxuan/v11arms/V2A (files 1-3), V2A5 (1-5).
+Floor / variance scan (offline, 39 ev): 15 MeV 96.15, 10 MeV 96.09, 10 MeV slot-only 95.80, 20 MeV +
+decidable 10-20 96.17 (all below the 20 MeV floor's 96.21); Poisson 300 A identical to 200 A; Poisson +
+(0.17 A)^2 95.68; trained variance predictor 94.12 (predictor + model error 94.67): the predictor describes
+waveform noise, not the 17 % light-model error, so it cannot be the placement weight (V200_DESIGN.md s.7).
+Open for v2.0 proper: an unbiased contact prior for the < 20 MeV population (physics rule or
+truth-validated purity), and cluster splitting with per-piece light from the perceiver.
+
+### v1.3 (2026-09-24) ADOPTED: v1.2.1 + stage 3.99 (exact-block re-solve >= 20 MeV)
+
+`run_v13.sh` = run_v12.sh + `--v200-min-e 20` (V200_DOM=3).  Certified on files 1-5 as above (arm V2A5);
+numbers for the record: all-TPC 95.54 -> 95.76, NS 96.70 -> 96.77, LE 60.95 -> 60.89, +5-12 s/ev.  The v1.2.2
+saturation ceiling is part of the same commit; run_v12.sh reproduces v1.2.2 behaviour (no stage 3.99).
+Tagged CLMatching_v1.2.2 and CLMatching_v1.3 on the same commit (repo + submodule); not pushed.

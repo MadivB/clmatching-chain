@@ -26,8 +26,10 @@ for p in (_HERE, os.path.join(_HERE, "..", "CLMatching_AlphaRelease"),
     if ap not in sys.path:
         sys.path.append(ap)
 from pulse_shapes import timeinterpolation  # noqa: E402
+from sat_clip import clip_rows, ceiling, ceiling_rows, LEGACY_CLIP  # noqa: E402
 
-CLIP, GAIN, PEAK = 60780.0, 200.0, 105
+GAIN, PEAK = 200.0, 105
+CLIP = LEGACY_CLIP   # legacy constant; math goes through sat_clip
 FWIN = 4
 WIN_LO, WIN_HI = PEAK - 15, PEAK + 50
 MIN_SEP = 20
@@ -111,11 +113,11 @@ def run_residual_reassign(ns: dict[str, Any], *,
             hi = min(n_tick, int(round(max(extra_from, extra_to))) + WIN_HI)
         else:
             return None
-        pred = np.clip(pred, 0.0, CLIP)
+        pred = np.clip(pred, 0.0, ceiling_rows(c))
         a = actual[c][np.ix_(supp, np.arange(lo, hi))]
-        pr = np.minimum(pred[np.ix_(supp, np.arange(lo, hi))], CLIP)
-        base_pr = np.minimum(base[c][np.ix_(supp, np.arange(lo, hi))], CLIP)
-        v = GAIN * np.maximum(a, 100.0); msk = a < 0.98 * CLIP
+        pr = clip_rows(pred[np.ix_(supp, np.arange(lo, hi))], c, supp)
+        base_pr = clip_rows(base[c][np.ix_(supp, np.arange(lo, hi))], c, supp)
+        v = GAIN * np.maximum(a, 100.0); msk = a < 0.98 * ceiling_rows(c, supp)
         cur = float((((base_pr - a) ** 2 / v)[msk]).sum())
         new = float((((pr - a) ** 2 / v)[msk]).sum())
         return cur, new
@@ -140,7 +142,7 @@ def run_residual_reassign(ns: dict[str, Any], *,
             for t_d, _h in _deficit_peaks(rt, thr):
                 t_d = t_d - PEAK
                 Rd = prof(R, t_d)                       # missing-light pattern
-                sat = prof(actual[c], t_d) >= 0.98 * CLIP
+                sat = prof(actual[c], t_d) >= 0.98 * ceiling(c)
                 # best-matching cluster PART not already at this flash
                 best = None
                 for L, tL, EL in parts:

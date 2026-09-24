@@ -16,7 +16,10 @@ and score on the same run (relative confidence within the run).
 """
 import numpy as np
 
-GAIN, PEAK, CLIP = 200.0, 105, 60780.0
+from sat_clip import ceiling, clip_scalar, LEGACY_CLIP
+
+GAIN, PEAK = 200.0, 105
+CLIP = LEGACY_CLIP   # legacy constant; math goes through sat_clip
 BLOCKS = (1, 2, 4, 8, 12, 24)
 FWIN = 4                       # +-ticks per flash window
 
@@ -63,13 +66,17 @@ def t0_list(A, placed_ticks=()):
     return sorted(set(int(c) for c in cand))
 
 
-def components(A, P_raw, ticks, alpha=None):
+def components(A, P_raw, ticks, alpha=None, tpc=None):
     """Per-TPC confidence components from actual A and predicted P (both [n_ch, n_tick]).
-    ticks = flash t0 list.  alpha auto-fit (removes the ML amplitude systematic)."""
-    A = np.asarray(A, float); P_raw = np.minimum(np.asarray(P_raw, float), CLIP)
+    ticks = flash t0 list.  alpha auto-fit (removes the ML amplitude systematic).
+    tpc = light-TPC index of A/P: selects the per-channel saturation ceiling registered
+    in sat_clip (falls back to the scalar event minimum / legacy 60780 when None)."""
+    ceil = ceiling(tpc) if tpc is not None else clip_scalar()        # (n_ch,) or scalar
+    ceil_rows = ceil if np.isscalar(ceil) else ceil[:, None]
+    A = np.asarray(A, float); P_raw = np.minimum(np.asarray(P_raw, float), ceil_rows)
     n_ch, n_t = A.shape
     if alpha is None:
-        m = A < 0.98 * CLIP; a = A[m]; p = P_raw[m]
+        m = A < 0.98 * ceil_rows; a = A[m]; p = P_raw[m]
         alpha = float((p @ a) / max(p @ p, 1e-9))
     P = alpha * P_raw
     if not len(ticks):
@@ -78,7 +85,7 @@ def components(A, P_raw, ticks, alpha=None):
     Fa = np.empty((len(ticks), n_ch)); Fp = np.empty_like(Fa)
     for i, tk in enumerate(ticks):
         lo, hi = max(0, tk - FWIN), min(n_t, tk + FWIN + 1)
-        aw = A[:, lo:hi]; pw = P[:, lo:hi]; sat = aw.max(1) >= 0.98 * CLIP
+        aw = A[:, lo:hi]; pw = P[:, lo:hi]; sat = aw.max(1) >= 0.98 * ceil
         av = aw.sum(1); pv = pw.sum(1); av[sat] = 0; pv[sat] = 0
         Fa[i] = av; Fp[i] = pv
     ampA = Fa.sum(1); tot = max(Fa.sum(), 1.0)

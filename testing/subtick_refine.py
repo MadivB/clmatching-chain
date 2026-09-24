@@ -26,11 +26,14 @@ import sys
 
 import numpy as np
 
+from sat_clip import clip_rows, clip_col, clip_scalar, LEGACY_CLIP
+
 _BASE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                      "CLMatching_AlphaRelease")
 DEFAULT_CKPT = ("/global/cfs/cdirs/dune/users/yuxuan/NDLAr-full/NewMLSection/"
                 "runs/ndfull_small4x/best_model_arch.pt")
-GAIN, CLIP = 200.0, 60780.0
+GAIN = 200.0
+CLIP = LEGACY_CLIP   # legacy constant; math goes through sat_clip
 S2, S4 = 1.75, 0.765625          # sums over x in {-0.75..0.75} step 0.25
 _MODEL = {}
 _SIPM = {}
@@ -189,7 +192,7 @@ def run_subtick_refine(ns, *, ckpt=None, truth_t0=None, half_ticks=3.0,
         _t_vox = _time.time() - _t0
         _t0 = _time.time()
         amps = predict_phi(maps_4d, model, gtpcs, target_scale=1e-3,
-                           batch_size=32, raw_clip=(0.0, CLIP),
+                           batch_size=32, raw_clip=(0.0, clip_scalar()),
                            min_prediction_threshold=100.0)
         _t_model = _time.time() - _t0
         _t0 = _time.time()
@@ -275,7 +278,7 @@ def run_subtick_refine(ns, *, ckpt=None, truth_t0=None, half_ticks=3.0,
             a_c, w_c = actual[c][ch], w_full[c][ch]
             amp_col = a_vec[ch, None]
             for k, dt in enumerate(offs):
-                pred = np.minimum(base + amp_col * _shift1(tmpl64, g["t"] + dt)[None, :], CLIP)
+                pred = clip_rows(base + amp_col * _shift1(tmpl64, g["t"] + dt)[None, :], c, ch)
                 curve[k] += float((w_c * np.square(pred - a_c)).sum())
         g["t_new"] = g["t"]
         if not any_sup:
@@ -301,9 +304,9 @@ def run_subtick_refine(ns, *, ckpt=None, truth_t0=None, half_ticks=3.0,
                     a_c, w_c = actual[c][ch], w_full[c][ch]
                     amp_col = a_vec[ch, None]
                     for k, dt_l in enumerate(offs):
-                        pred = np.minimum(
+                        pred = clip_rows(
                             base_l + amp_col * _shift1(tmpl64, g["t"] + dt_l)[None, :],
-                            CLIP)
+                            c, ch)
                         curve_l[k] += float((w_c * np.square(pred - a_c)).sum())
                 if not any_l:
                     continue
@@ -364,7 +367,7 @@ def run_subtick_refine(ns, *, ckpt=None, truth_t0=None, half_ticks=3.0,
                 a_c, w_c = actual[c][keep], w_full[c][keep]
                 Lrc = np.zeros((keep.size, offs.size))
                 for k, dt in enumerate(offs):
-                    pred = np.minimum(base + timeinterpolation(img_k, shift=tg + dt, baseline=0), CLIP)
+                    pred = clip_rows(base + timeinterpolation(img_k, shift=tg + dt, baseline=0), c, keep)
                     Lrc[:, k] = (w_c * np.square(pred - a_c)).sum(axis=1)
                 t_ch = np.full(keep.size, np.nan)
                 for r in range(keep.size):
@@ -427,7 +430,7 @@ def run_subtick_refine(ns, *, ckpt=None, truth_t0=None, half_ticks=3.0,
             own_pk = a_vec[ch] * tmpl_pk
             base_pk = _field(c, ch, gi)[:, k0]
             a_pk = actual[c][ch, k0]
-            model = np.minimum(base_pk + own_pk, CLIP)
+            model = clip_col(base_pk + own_pk, c, ch)
             zs.append((model - a_pk) / np.sqrt(GAIN * np.maximum(a_pk, 100.0)))
             amps_v.append(own_pk)
             resid_v.append(np.clip(a_pk - base_pk, 0.0, None))

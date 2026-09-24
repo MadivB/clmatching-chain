@@ -25,6 +25,7 @@ import numpy as np
 
 from spatial_score import emedian
 from v030_expansion import GAIN, SEARCH, _shift, weighted_scan
+from sat_clip import ceiling
 
 CUT = 10.0
 UNASSIGNED = -10000.0
@@ -219,7 +220,7 @@ def run_decline(ns: dict[str, Any], *, r_max: float = 0.5,
                             if 0 <= s0 < n_ticks:
                                 v[s0:] += tmpl[p][(c, ch)][:n_ticks - s0]
                     tot += float((w_all[c][ch]
-                                  * (np.minimum(v, 60780.0)
+                                  * (np.minimum(v, ceiling(c, ch))
                                      - actual[c][ch]) ** 2).sum())
                 return tot
 

@@ -40,9 +40,11 @@ sys.path.insert(2, os.path.join(BASE_DIR, "M5p1"))
 import numpy as np
 from scipy.signal import fftconvolve
 
+from sat_clip import clip_rows, LEGACY_CLIP
+
 PEAK = 105
 GAIN = 200.0
-CLIP = 60780.0
+CLIP = LEGACY_CLIP   # legacy constant; math goes through sat_clip
 SEARCH = 895
 CUT = 10.0
 MAX_BATCH = 5
@@ -270,7 +272,7 @@ def place_pool_v02(pool, s, baseA, info, image_maps, actual, w_full, ti,
                 tot = sum(_v050.point_loss(sb[c], act_u[c], w_u[c], LOSS_MODE)
                           for c in uch)
                 return abs(float(tot))      # decision key: drive |L| -> 0
-            return float(sum(np.sum(w_u[c] * (np.minimum(sb[c], CLIP) - act_u[c]) ** 2)
+            return float(sum(np.sum(w_u[c] * (clip_rows(sb[c], c, uch[c]) - act_u[c]) ** 2)
                              for c in uch))
 
         def dfs(remaining, sb, order, ts):
