@@ -634,6 +634,31 @@ size and of materialising the image maps, which the new `amplitudes_only` option
 events 0 and 8): 7 moves, 6 right, all-TPC +0.12 pp on both spills, 8-15 s.  Holdout of the kernel and the 5-file
 certification V14M = v1.4 + `--michel-nd --mnd-host-extent-cm 20 --mnd-bragg-end-cm 20 --mnd-piece-max-mev 60`
 (`testing/sbatch_v14m_V14M.sh`, reference V14A) running.
+Kernel holdout (files 4-5, 24 spills): 44 moves (33 pieces + 11 whole), fixed 0.35 / broken 0.14 GeV, net +0.21, purity
+0.71 (pieces 0.70, whole 0.75), spills 13 / 5, delayed class 7.7 -> 9.5 %, 8.7 s per spill.  Dev + holdout together:
+108 moves, 1.09 / 0.25 GeV, purity 0.81, 40 / 9 spills.  First certification attempt crashed 3 of 8 workers with CUDA
+out-of-memory (perceiver batch 64 = 11 GiB of dense voxel grids with two workers per GPU); relaunched with batch 16.
+
+**CERTIFIED (arm V14M vs V14A, 63 spills, in-chain, 2026-10-02; `testing/v14m_cert_V14M.log`):**
+
+| | v1.4 | v1.4 + stage 4.85 | delta | spills better / worse |
+|---|---|---|---|---|
+| NS efficiency | 96.89 | 96.92 | +0.028 pp | 38 / 8 |
+| all-TPC accuracy | 95.86 | 95.88 | +0.021 pp | 41 / 11 |
+| LE class | 65.55 | 65.57 | | |
+
+Every file up on both metrics (NS +0.01 to +0.07).  Wrong energy: 5-20 MeV 20.59 -> 20.45 GeV, 20-100 MeV 32.64 ->
+32.35, >= 100 MeV 52.75 -> 52.39, total 160.63 -> 159.83.  Stage 4.85 in-chain: 388 probe pieces + 390 whole candidates
+per spill, 394 perceiver predictions, 1.94 moves per spill (122 in all, 34 whole clusters), 68 % right / 27 % wrong,
+fixed 1.14 / broken 0.34 GeV (pieces 791 / 245, whole 345 / 92; purity 0.77), 10.0 s per spill median, p90 14.5
+(dense points 1.0, geometry 1.3, perceiver 5.6 + 0.4, scans 1.6).  Chain total 148 s per spill per worker on this node
+(v1.4 136).  The ledger gain is small by construction (the delayed-daughter class is 0.64 % of the energy); the product
+is the Michel tag: the class goes from ~6 % to ~10 % correctly timed with 77 % purity on the moves.
+Launcher `run_v15.sh` (v1.5 CANDIDATE = v1.4 + `--michel-nd` with the gates above); adoption as the default is the
+user's call on the time budget (10 s per spill against the 3 s asked for the earlier late stages).  Speed levers left:
+the perceiver's ~11 ms per piece is per-group overhead (grouping / voxelisation), not GPU compute - a piece-level
+voxeliser that reuses the host cluster's voxel grid, or an amplitude-native (no image) prediction path, would take the
+stage to ~4 s; restricting hosts to track-type clusters does not pay (37 of 85 true Michel hosts are typed 'cluster').
 
 ### v1.4 ADOPTED 2026-10-01 = v1.3 + stage 4.9 light-vote force (20 cm) + stage 4.8 residual-flash filling (tag CLMatching_v1.4)
 

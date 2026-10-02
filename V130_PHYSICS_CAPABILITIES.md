@@ -233,6 +233,13 @@ Event displays of types 1-5: `testing/v12_displays/` (light-vs-prediction, reco 
   testing/v14_michel_nd.py, 2026-10-01) raises the correctly timed share of that class from 6.4 % to 10.7 % on the 63
   certified spills at 75 % purity (1.44 GeV fixed, 0.49 broken), but costs 100 s per spill offline and is not in the
   chain; 65 % of ND Michel flashes coincide with another family within 5 ticks, which is what limits it (VERSION_HISTORY).
+  **Update 2026-10-02:** the piece-first rewrite (stage 4.85, `testing/michel_nd.py`, flag `--michel-nd`, v1.5 candidate
+  `run_v15.sh`) does the same job at 10 s per spill: a Bragg-attached end piece or a small whole cluster is moved to its
+  own later flash when the perceiver light of the piece matches the residual there, the prompt shows the deficit, and
+  the light at the destination is unexplained beyond the families' 30 % model error. Certified on the 63 spills: NS
+  +0.028 pp (38/8), all-TPC +0.021 (41/11), 122 moves at 77 % purity, delayed-daughter class ~6 -> ~10 % correctly
+  timed. The Bragg attachment is the discriminant the light cannot supply: pieces leaving a Bragg ball are 76-83 %
+  pure, other free ends 17 %.
 - **Low-energy physics (isolated 1-20 MeV deposits) is the weak point**: interaction-level recovery 32-42 %, hit accuracy
   66-87 %. The measured cause is the light-prediction engine at low energy. A physics goal that rests on isolated
   low-energy blips should plan for the engine retraining first.

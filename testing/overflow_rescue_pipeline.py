@@ -760,7 +760,7 @@ def main() -> int:
                          "the residual there and the prompt shows the deficit (user 2026-10-02); after 4.8, before 4.9")
     ap.add_argument("--mnd-host-extent-cm", type=float, default=0.0); ap.add_argument("--mnd-bragg-end-cm", type=float, default=1e9)
     ap.add_argument("--mnd-piece-max-mev", type=float, default=1e9); ap.add_argument("--mnd-delay-max", type=float, default=300.0)
-    ap.add_argument("--mnd-batch", type=int, default=64)
+    ap.add_argument("--mnd-batch", type=int, default=16)   # 64 x dense voxel grids = 11 GiB: two workers per GPU ran out of memory
     ap.add_argument("--force-light-cm", type=float, default=None,
                     help="stage 4.9 variant (force_light_vote.py): cluster-density vote for noise hits beyond 3 cm, "
                          "multiplied by the positive light residual on the 6 nearest channels for hits farther than "
