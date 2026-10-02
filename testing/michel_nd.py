@@ -33,6 +33,8 @@ class MichelNDConfig:
     piece_min_hits = 3; piece_min_mev = 5.0; piece_max_mev = 1e9; max_frac = 0.5; mf_window = (-3, 45); n_minima = 2
     mf_min = 0.8; mf_tol = 0.02; apc_max = -0.5; sat_max = 0.5; cov_min = 0.2; alpha_lo = 0.8; alpha_hi = 6.0
     support_frac = 0.9; require_bragg = True; min_tpc_hits = 6; host_extent_min_cm = 0.0; bragg_end_cm = 1e9; vox_cm = 1.0
+    band_cm = 10.0; band_dedx_max = 1e9      # local host dE/dx: energy in the band_cm of track just behind the Bragg stop (geodesic from the tip) / band_cm
+    remainder_min_mev = 0.0                  # piece growth also stops when the host remainder in the TPC would fall below this (a Michel may out-weigh a short pion host)
     unexpl_gain_tol = 0.3; unexpl_min_frac = 0.1   # light at the destination must stay >= this fraction of the actual after the placed families may scale up by gain_tol
     whole_alpha_hi = 2.0                            # whole-cluster moves: amplitude ratio cap (bad whole moves read alpha 2.3-3.3)
     host_dedx_max = 1e9        # mean dE/dx of the host in the TPC (E / geodesic extent, MeV/cm); Michel hosts read 1.9-3.6 (stopping mu / pi)
@@ -154,7 +156,7 @@ def run_michel_nd(*, xyz, e, tpc, labels, ts, amp, actual, base, veto, ceil, tem
             c = int(c)
             if c >= n_light or (L, c) not in amp:
                 continue
-            h = h_all[tpc[h_all] == c]
+            h = h_all[tpc[h_all] == c]; E_h = float(e[h].sum())
             if h.size < max(2 * cfg.piece_min_hits, cfg.min_tpc_hits):
                 continue
             if cfg.vox_cm > 0:
@@ -188,7 +190,7 @@ def run_michel_nd(*, xyz, e, tpc, labels, ts, amp, actual, base, veto, ceil, tem
                     mk = (D[ti] >= 0) & (D[ti] <= Lc)
                     if e[h][mk & excl].sum() > cfg.dense_leak_mev:
                         bragg = True; stop_xyz = X[h][mk & excl].mean(0); break
-                    if mk.sum() > h.size - cfg.piece_min_hits or e[h][mk].sum() > cfg.max_frac * E_of[L] or e[h][mk].sum() > cfg.piece_max_mev:
+                    if mk.sum() > h.size - cfg.piece_min_hits or e[h][mk].sum() > cfg.max_frac * E_of[L] or e[h][mk].sum() > cfg.piece_max_mev or (E_h - e[h][mk].sum()) < cfg.remainder_min_mev:
                         break
                     if mk.sum() >= cfg.piece_min_hits and e[h][mk].sum() >= cfg.piece_min_mev:
                         masks[Lc] = mk
@@ -196,8 +198,14 @@ def run_michel_nd(*, xyz, e, tpc, labels, ts, amp, actual, base, veto, ceil, tem
                     continue
                 if bragg and cfg.bragg_end_cm < 1e8 and np.min(np.linalg.norm(ends_xyz - stop_xyz[None, :], axis=1)) > cfg.bragg_end_cm:
                     continue
+                band_dedx = None
+                if bragg:
+                    L_stop = float(Lc); band = (D[ti] > L_stop) & (D[ti] <= L_stop + cfg.band_cm); band_dedx = float(e[h][band].sum()) / cfg.band_cm
+                    if cfg.band_dedx_max < 1e8 and band_dedx > cfg.band_dedx_max:    # heavily ionising host just behind the stop (proton): no Michel
+                        continue
                 probe = max(Lc for Lc in masks if Lc <= cfg.piece_cm_probe) if any(Lc <= cfg.piece_cm_probe for Lc in masks) else min(masks)
-                cands.append(dict(L=L, c=c, tip=int(tip), hits=h, masks=masks, bragg=bragg, probe=probe))
+                pt = X[h][tip]; bx = cfg.box; face = float(min(pt[0] - bx[0], bx[1] - pt[0], pt[1] - bx[2], bx[3] - pt[1], pt[2] - bx[4], bx[5] - pt[2]))
+                cands.append(dict(L=L, c=c, tip=int(tip), hits=h, masks=masks, bragg=bragg, probe=probe, ext=extent, band=band_dedx, face=face, dedx=float(e[h].sum()) / max(extent, 1.0)))
     wholes = [(L, c) for (L, c) in amp if cfg.whole_min_mev <= E_of.get(L, 0) <= cfg.whole_max_mev and L in t_of and c < n_light]
     tim["geom"] = time.time() - t0
     if debug_out is not None and debug_tag is not None:
@@ -207,7 +215,12 @@ def run_michel_nd(*, xyz, e, tpc, labels, ts, amp, actual, base, veto, ceil, tem
                 hp = cd["hits"][mk]; tg = debug_tag[hp]
                 for tv in np.unique(tg[tg >= 0]):
                     cov_tag[int(tv)] = max(cov_tag.get(int(tv), 0.0), float(e[hp][tg == tv].sum()))
-        debug_out.append(dict(kind="geometry", covered=cov_tag))
+        cov_whole = {}
+        for (L, c) in wholes:
+            hp = lab_hits[L]; tg = debug_tag[hp]
+            for tv in np.unique(tg[tg >= 0]):
+                cov_whole[int(tv)] = max(cov_whole.get(int(tv), 0.0), float(e[hp][tg == tv].sum()))
+        debug_out.append(dict(kind="geometry", covered=cov_tag, covered_whole=cov_whole, n_cand=len(cands), n_whole=len(wholes)))
     # 3. perceiver (probe pieces)
     pred = {}
 
@@ -227,10 +240,12 @@ def run_michel_nd(*, xyz, e, tpc, labels, ts, amp, actual, base, veto, ceil, tem
             w_cache[c] = 1.0 / (GAIN * np.maximum(actual[c].astype(np.float64), 100.0))
         return w_cache[c]
 
+    last = {}
+
     def scan(a_p, c, R, t_c):
         w = weights(c); q = (a_p ** 2) @ w; r = a_p @ (w * R)
         curve = fftconvolve(q, T2[::-1], mode="full")[kS: kS + 886] - 2.0 * fftconvolve(r, T[::-1], mode="full")[kS: kS + 886]
-        lo = int(t_c + cfg.late_min_ticks) + 1; hi = min(int(t_c + cfg.delay_max), 885)
+        lo = int(t_c + cfg.late_min_ticks) + 1; hi = min(int(t_c + cfg.delay_max), 885); last["curve"] = curve; last["lo"] = lo; last["hi"] = hi
         if hi <= lo:
             return []
         seg = curve[lo: hi + 1]
@@ -268,9 +283,10 @@ def run_michel_nd(*, xyz, e, tpc, labels, ts, amp, actual, base, veto, ceil, tem
         den_u = float(F_u @ F_u); g_u = min(max(float(r_u @ F_u) / den_u, 0.0), cfg.unexpl_gain_tol) if den_u > 0 else 0.0
         unexpl = float(np.clip(r_u - g_u * F_u, 0, None).sum() / max(a_u, 1e-9))
         E_p = float(e[hits_p].sum())
+        pfrac = float(Sp[sup].sum() / max(own_c[sup].sum(), 1e-9)) if sup.size else np.nan
         passes = (mf >= cfg.mf_min and cfg.alpha_lo <= alpha <= (cfg.whole_alpha_hi if whole else cfg.alpha_hi) and np.isfinite(apc) and apc <= cfg.apc_max
                   and sat <= cfg.sat_max and cov >= cfg.cov_min and E_p >= cfg.piece_min_mev and unexpl >= cfg.unexpl_min_frac)
-        return dict(mf=mf, alpha=alpha, apc=apc, sat=sat, cov=cov, unexpl=unexpl, E_p=E_p, ok=passes, Sg=Sg, Sp=Sp, tf=tf, hits=hits_p)
+        return dict(mf=mf, alpha=alpha, apc=apc, sat=sat, cov=cov, unexpl=unexpl, E_p=E_p, ok=passes, Sg=Sg, Sp=Sp, tf=tf, hits=hits_p, pfrac=pfrac, n_sup=int(sup.size))
 
     def dbg(sc, kind):
         """record a scored hypothesis: tag composition (energy per tag value) + scores"""
@@ -279,26 +295,50 @@ def run_michel_nd(*, xyz, e, tpc, labels, ts, amp, actual, base, veto, ceil, tem
         hp = sc["hits"]; tg = debug_tag[hp]; comp = {}
         for tv in np.unique(tg[tg >= 0]):
             comp[int(tv)] = float(e[hp][tg == tv].sum())
-        debug_out.append(dict(kind=kind, L=int(sc["L"]), c=int(sc["c"]), tip=int(sc.get("tip", -1)), Lc=float(sc.get("Lc", -1)), tf=float(sc["tf"]), t_c=float(t_of[sc["L"]]),
-                              E_p=sc["E_p"], mf=sc["mf"], alpha=sc["alpha"], apc=sc["apc"], sat=sc["sat"], cov=sc["cov"], unexpl=sc["unexpl"], ok=bool(sc["ok"]), comp=comp))
+        rec = dict(kind=kind, L=int(sc["L"]), c=int(sc["c"]), tip=int(sc.get("tip", -1)), Lc=float(sc.get("Lc", -1)), tf=float(sc["tf"]), t_c=float(t_of[sc["L"]]),
+                   E_p=sc["E_p"], mf=sc["mf"], alpha=sc["alpha"], apc=sc["apc"], sat=sc["sat"], cov=sc["cov"], unexpl=sc["unexpl"], ok=bool(sc["ok"]), comp=comp,
+                   pfrac=sc.get("pfrac"), n_sup=sc.get("n_sup"), E_L=float(E_of[sc["L"]]))
+        cd_ = sc.get("cd")
+        if cd_ is not None:
+            rec.update(ext=cd_.get("ext"), band=cd_.get("band"), face=cd_.get("face"), dedx=cd_.get("dedx"))
+        if truth_t0 is not None:
+            okh = ok[hp]; Et = float(e[hp][okh].sum())
+            if Et > 0:
+                rec["right_now"] = float((e[hp][okh] * (np.abs(sc["tf"] - truth_t0[hp][okh]) <= CUT)).sum() / Et)
+                rec["right_before"] = float((e[hp][okh] * (np.abs(t_of[sc["L"]] - truth_t0[hp][okh]) <= CUT)).sum() / Et)
+        debug_out.append(rec)
+
+    def dbg_cand(kind, L, c, tip, Lc, hp, status, tfs):
+        """debug: one record per candidate with its status and, when truth is known, the scan curve at the true time"""
+        if debug_out is None or debug_tag is None:
+            return
+        tg = debug_tag[hp]; comp = {int(tv): float(e[hp][tg == tv].sum()) for tv in np.unique(tg[tg >= 0])}
+        rec = dict(kind=kind, L=int(L), c=int(c), tip=int(tip), Lc=float(Lc), t_c=float(t_of[L]), E_p=float(e[hp].sum()), status=status, n_min=len(tfs), tfs=[float(v) for v in tfs], comp=comp)
+        if truth_t0 is not None and "curve" in last and status in ("no_minima", "scored"):
+            tv = truth_t0[hp]; tv = tv[np.isfinite(tv)]
+            if tv.size:
+                tt = float(np.median(tv)); k = int(round(tt)); cv = last["curve"]
+                rec.update(tt=tt, in_range=bool(last["lo"] <= k <= last["hi"]), curve_tt=float(cv[k]) if 0 <= k < cv.size else None, curve_min=float(cv[last["lo"]: last["hi"] + 1].min()) if last["hi"] > last["lo"] else None,
+                           neg_frac=float((cv[last["lo"]: last["hi"] + 1] < 0).mean()) if last["hi"] > last["lo"] else None)
+        debug_out.append(rec)
 
     t0 = time.time(); res = []
     for cd in cands:
-        L, c, tip = cd["L"], cd["c"], cd["tip"]; a_p = pred.get((L, c, tip, cd["probe"]))
+        L, c, tip = cd["L"], cd["c"], cd["tip"]; a_p = pred.get((L, c, tip, cd["probe"])); hp_ = cd["hits"][cd["masks"][cd["probe"]]]
         if a_p is None or a_p.max() <= 0:
-            continue
+            last.clear(); dbg_cand("cand", L, c, tip, cd["probe"], hp_, "no_pred" if a_p is None else "zero_pred", []); continue
         A = actual[c].astype(np.float64); B = base[c].astype(np.float64); w = weights(c); cl = np.asarray(ceil[c], np.float64)
         own_c = render(amp[(L, c)] * (~veto[c]), t_of[L], n_s, T); Sp = render(a_p, t_of[L], n_s, T); rest = np.clip(own_c - Sp, 0, None)
-        R = A - (B - own_c + rest)
-        for tf in scan(a_p, c, R, t_of[L]):
-            sc = score(a_p, c, L, cd["hits"][cd["masks"][cd["probe"]]], tf, own_c, rest, A, B, w, cl); sc.update(L=L, c=c, tip=tip, Lc=cd["probe"], whole=False, cd=cd); res.append(sc); dbg(sc, "probe")
+        R = A - (B - own_c + rest); last.clear(); tfs = scan(a_p, c, R, t_of[L]); dbg_cand("cand", L, c, tip, cd["probe"], hp_, "scored" if tfs else "no_minima", tfs)
+        for tf in tfs:
+            sc = score(a_p, c, L, hp_, tf, own_c, rest, A, B, w, cl); sc.update(L=L, c=c, tip=tip, Lc=cd["probe"], whole=False, cd=cd); res.append(sc); dbg(sc, "probe")
     for (L, c) in wholes:
         a_p = amp[(L, c)] * (~veto[c])
         if a_p.max() <= 0:
             continue
         A = actual[c].astype(np.float64); B = base[c].astype(np.float64); w = weights(c); cl = np.asarray(ceil[c], np.float64)
-        own_c = render(a_p, t_of[L], n_s, T); R = A - (B - own_c)
-        for tf in scan(a_p, c, R, t_of[L]):
+        own_c = render(a_p, t_of[L], n_s, T); R = A - (B - own_c); last.clear(); tfs = scan(a_p, c, R, t_of[L]); dbg_cand("candw", L, c, -1, -1, lab_hits[L], "scored" if tfs else "no_minima", tfs)
+        for tf in tfs:
             sc = score(a_p, c, L, lab_hits[L], tf, own_c, np.zeros_like(own_c), A, B, w, cl, whole=True); sc.update(L=L, c=c, tip=-1, Lc=-1, whole=True, cd=None); res.append(sc); dbg(sc, "whole")
     tim["scan"] = time.time() - t0
     # 5. refinement + selection
@@ -317,7 +357,7 @@ def run_michel_nd(*, xyz, e, tpc, labels, ts, amp, actual, base, veto, ceil, tem
                 sc = score(a_p, c, L, cd["hits"][mk], r["tf"] + dt, own_c, rest, A, B, w, cl)
                 if not sc["ok"]:
                     continue
-                sc.update(L=L, c=c, tip=r["tip"], Lc=Lc, whole=False); dbg(sc, "refine")
+                sc.update(L=L, c=c, tip=r["tip"], Lc=Lc, whole=False, cd=cd); dbg(sc, "refine")
                 if best is None or sc["mf"] > best["mf"] + cfg.mf_tol or (sc["mf"] >= best["mf"] - cfg.mf_tol and sc["E_p"] > best["E_p"]):
                     best = sc
         if best is not None:

@@ -698,6 +698,62 @@ the Michel time exists for 533 (13.8 GeV), none for 346 (5.3 GeV); a loose wavef
 flashes), the 17 % model systematics that forced the purity gates, and the pion-hosted majority (short, often < 20 cm,
 hosts) are the differences.  A per-Michel recall audit through the stage (which gate loses each Michel) is the next
 measurement (kernel `debug_tag` / `debug_out` hook).
+
+**Ending gates (2026-10-02, kernel options `host_dedx_max`, `tip_face_min_cm`; harness `--mnd-host-dedx-max`,
+`--mnd-tip-face-cm`): the census's two usable handles applied to candidate generation.**  A host is skipped when its
+cluster energy / skeleton extent exceeds the cap (proton-like or shower-like: no Michel) and a free tip is skipped when it
+is within 5 cm of the outer detector box (exiting track).  Kernel on the V14A dumps, 63 spills: certified gates alone
+108 moves, fixed 1.09 / broke 0.25 GeV, 8.5 s per spill; + dE/dx <= 5 & face >= 5 (13 spills) 23 moves 0.36 / 0.02,
+purity 0.94, 6.3 s; + dE/dx <= 4 & face >= 5 (13 spills) 21 moves 0.36 / 0.01, purity 0.98, 5.6 s; dE/dx <= 5 & face >= 5
+on all 63 spills: 102 moves, fixed 1.04 / broke 0.25, purity 0.80, delayed class 6.5 -> 9.3 % (same as without the
+gates), 6.1 s per spill (perceiver 2.7 s): the gates remove ~30 % of the pieces (and their model compute) and none of
+the recovery.  Re-certification arm V14M2 = v1.4 + stage 4.85 with dE/dx <= 4, face >= 5 (`testing/sbatch_v14m_V14M2.sh`).
+
+**Per-Michel recall audit (2026-10-02, `testing/v15_michel_audit.py` through the kernel's `debug_tag` / `debug_out` hooks,
+which now record every candidate's status and every scored hypothesis with its geometry and truth; offline gate scan
+`testing/v15_michel_gatescan.py`; 63 spills, 671 delayed Michels (> 12 ticks after the host, >= 5 MeV, 13.25 GeV),
+`michel_nd_out/michel_audit5_63.{log,json}`, `gatescan_63.log`):** where each delayed Michel is lost.
+- Geometry: 40 % of the delayed Michel energy never enters a candidate; 24 % enters only through the whole-cluster
+  route, which is useless for a merged cluster (the host dominates its light); a probe piece holds part of the Michel for
+  54 %.  The probe is what the scan uses: ~9 MeV, 5 cm, Michel-pure (median purity 1.00) but holding only ~40 % of the
+  Michel (Michels are longer than the probe; the refine step extends the piece afterwards).  Reasons for merged Michels
+  without a piece: Bragg ball not within 20 cm of a host end 7 %, no Bragg ball within 16 cm of the tip 7 %, tip within
+  3 cm of a dense point 5 %, no skeleton tip inside the Michel 4 %, tip within 5 cm of the outer face 3 %, host extent
+  < 20 cm 4 % (1 % at 10 cm), none of the recorded reasons 5-10 %.  The cluster-level dE/dx cap (E / extent <= 4) had
+  removed 24 % of the delayed Michel energy from coverage: a merged "host" cluster is usually a whole interaction
+  (median 145 MeV, extent 42 cm), so E / extent is not a track dE/dx.
+- Scan: 43 % of the delayed Michel energy gets a scored probe (the matched-filter curve is negative at the true time
+  for 95 % of them, the true time inside the scan range for 88 %); 11 % has a probe but no scan minimum (true time
+  outside [t_c + 12, t_c + 300] for 42 %: the cluster already sits AT the Michel time with a wrong host, or elsewhere).
+- Gates (20 spills): a hypothesis exists at the true time for 21 % of the delayed Michel energy; 4 % passes (85 %
+  correct afterwards), 17 % fails: apc 14 %, mf 12 %, alpha 8 %, unexpl 3 %, cov 2 % (passing / failing values mf 0.88 /
+  0.77, apc -1.05 / +0.18, unexpl 0.36 / 0.14).  apc ("the piece's light is missing at the host time") has little power
+  for an 8 MeV piece under a 100 MeV host with 17 % model systematics, but removing it collapses the move purity
+  (offline scan: right 0.78 -> 0.48); making it conditional on the piece / host light ratio is no better than simply
+  loosening it.
+- Perceiver threshold: `min_prediction_threshold = 100` ADC had zeroed the faint channels of 5-20 MeV pieces, which
+  made the 90 % support set a handful of channels.  With 0 (`amplitudes_only` calls in the harness, evaluator and
+  audit): 63-spill kernel 102 -> 81 moves, fixed 1.04 -> 0.96, broke 0.25 -> 0.15 GeV, purity 0.80 -> 0.86.
+- 10 % of the delayed Michel energy sits with its merged cluster AT the Michel time (28 clusters in 20 spills, 2.0 GeV
+  of host energy wrong): the mirror move (host earlier, Michel stays) is a separate lever, not built.
+
+Kernel sweeps on the V14A dumps (63 spills, un-zeroed predictions, batch 16, certified gates + tip >= 5 cm from the
+outer face unless stated; fixed / broke in GeV, purity = fixed / (fixed + broke) on the moved energy, s per spill):
+
+| handle | moves | fixed | broke | purity | delayed class | s |
+|---|---|---|---|---|---|---|
+| cluster E/extent <= 5 (zeroed predictions, old) | 102 | 1.04 | 0.25 | 0.80 | 6.5 -> 9.3 % | 6.1 |
+| cluster E/extent <= 5 | 81 | 0.96 | 0.15 | 0.86 | 9.0 % | 6.7 |
+| cluster E/extent <= 8 | 85 | 0.98 | 0.16 | 0.86 | 9.1 % | 7.5 |
+| band dE/dx <= 5 (10 cm of host behind the Bragg stop) | 80 | 0.95 | 0.14 | 0.87 | 9.0 % | 6.3 |
+| band dE/dx <= 4 | 77 | 0.92 | 0.14 | 0.87 | 8.8 % | 5.9 |
+| band 5, host extent >= 10 cm | 97 | 1.08 | 0.24 | 0.82 | 9.3 % | 7.3 |
+| band 5, host extent >= 0 | 100 | 1.09 | 0.26 | 0.81 | 9.4 % | 7.6 |
+
+Offline gate scan (probe-level emulation, extent 20, face 5): mf 0.8 / apc -0.5 (certified) net +0.34 GeV at 0.78
+right; mf 0.75 / apc -0.25 net +0.43 at 0.72 right with 50 % more Michel energy in the moves; unexpl higher = purer and
+smaller; alpha bounds irrelevant.  The light gates sit on a plateau; the recall ceiling is geometry (candidate
+generation) and ND pile-up, not the gate values.
   Speed levers left:
 the perceiver's ~11 ms per piece is per-group overhead (grouping / voxelisation), not GPU compute - a piece-level
 voxeliser that reuses the host cluster's voxel grid, or an amplitude-native (no image) prediction path, would take the

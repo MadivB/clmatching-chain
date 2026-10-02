@@ -247,6 +247,21 @@ Event displays of types 1-5: `testing/v12_displays/` (light-vs-prediction, reco 
   delayed ones (13.4 GeV) go from 13 % to 17 %; 80 % of the Michel energy sits at the host's time. Michels with no
   family within 5 ticks of their flash: 4 -> 8 %. This, not the ledger, is the number a kaon / Michel analysis should
   plan with.
+  **Why the delayed Michels stay at 16-17 % (recall audit, 2026-10-02, `testing/v15_michel_audit.py`, 63 spills):** the
+  loss is in candidate geometry, not in the light test. 40 % of the delayed Michel energy never becomes a candidate
+  piece (the merged "host" cluster is usually a whole interaction: the Bragg ball is not near a skeleton end, no Bragg
+  ball is found at the tip, the tip sits inside a dense region, or no skeleton tip falls in the Michel); 24 % enters only
+  as a whole cluster, which is host-dominated and cannot be re-timed; a clean 5 cm Michel probe exists for 54 %, and its
+  light correlates at the true time in 95 % of the scored cases, but the purity gates then keep 4 % (85 % correct). The
+  gates are on a plateau: loosening them buys 50 % more Michel energy at a move purity of 0.72 instead of 0.78, and
+  removing the "light missing at the host time" test halves the purity. Two real fixes came out of the audit: the
+  light predictor's 100 ADC floor had been zeroing the faint channels of 5-20 MeV pieces (purity 0.80 -> 0.86 when
+  lifted), and the host dE/dx handle must be local (the 10 cm of track behind the Bragg stop, <= 5 MeV/cm), not the
+  cluster's energy / extent, which had discarded a quarter of the delayed Michels as "proton-like". A geometric
+  track-ending classifier (exit / TPC face / continuation / stop) cannot tag Michels on its own: Michel ends are 0.9 % of
+  track ends, their hosts are stopped pi+ (mu- are captured, rock muons go through), and the "MIP-like isolated stop"
+  rule is 4 % Michel. 10 % of the delayed Michel energy sits in a cluster already placed at the Michel's time with the
+  host wrong (2 GeV of host energy per 20 spills): the mirror move, host earlier and Michel stays, is an unbuilt lever.
 - **Low-energy physics (isolated 1-20 MeV deposits) is the weak point**: interaction-level recovery 32-42 %, hit accuracy
   66-87 %. The measured cause is the light-prediction engine at low energy. A physics goal that rests on isolated
   low-energy blips should plan for the engine retraining first.

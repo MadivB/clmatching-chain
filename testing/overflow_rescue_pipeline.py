@@ -760,6 +760,9 @@ def main() -> int:
                          "the residual there and the prompt shows the deficit (user 2026-10-02); after 4.8, before 4.9")
     ap.add_argument("--mnd-host-extent-cm", type=float, default=0.0); ap.add_argument("--mnd-bragg-end-cm", type=float, default=1e9)
     ap.add_argument("--mnd-piece-max-mev", type=float, default=1e9); ap.add_argument("--mnd-delay-max", type=float, default=300.0)
+    ap.add_argument("--mnd-host-dedx-max", type=float, default=1e9)   # host cluster E / skeleton extent (MeV/cm); proton-like hosts carry no Michel
+    ap.add_argument("--mnd-tip-face-cm", type=float, default=0.0)      # free tip must be >= this far from the outer detector box (exiting tracks)
+    ap.add_argument("--mnd-set", nargs="*", default=[])              # any MichelNDConfig field, k=v (applied after the named flags)
     ap.add_argument("--mnd-batch", type=int, default=16)   # 64 x dense voxel grids = 11 GiB: two workers per GPU ran out of memory
     ap.add_argument("--force-light-cm", type=float, default=None,
                     help="stage 4.9 variant (force_light_vote.py): cluster-density vote for noise hits beyond 3 cm, "
@@ -2554,13 +2557,16 @@ def main() -> int:
                                 pm["lab"][h] = 1_000_000 + j; pm["used"][h] = True; pm["want"].add(1_000_000 + j); pm["keys"].append((j, k)); passes.append(pm)
                         for pm in passes:
                             _, meta = _mnd_pred(_mx, _my, _mz, _me, _mtpc, pm["lab"], model=models.light_model, template=_mtmpl, batch_size=int(args.mnd_batch),
-                                                restrict_clusters=pm["want"], device_policy="auto", amplitudes_only=True)
+                                                restrict_clusters=pm["want"], device_policy="auto", amplitudes_only=True, min_prediction_threshold=0.0)
                             amps = {(int(c_), int(t_)): meta["amplitudes"][i] for i, (c_, t_) in enumerate(zip(meta["group_cls"], meta["group_tpcs"]))}
                             for j, k in pm["keys"]:
                                 v = amps.get((1_000_000 + j, k[1])); out[k] = np.asarray(v, np.float64) if v is not None else np.zeros(n_light_ch)
                         return out
                     _mnd_T = np.load(os.path.join(BASE_DIR, "assets", "avg_pulse.npy")).astype(np.float64).ravel(); _mnd_T = _mnd_T / _mnd_T.max()
-                    _mcfg = MichelNDConfig(); _mcfg.host_extent_min_cm = float(args.mnd_host_extent_cm); _mcfg.bragg_end_cm = float(args.mnd_bragg_end_cm)
+                    _mcfg = MichelNDConfig(); _mcfg.host_extent_min_cm = float(args.mnd_host_extent_cm); _mcfg.bragg_end_cm = float(args.mnd_bragg_end_cm); _mcfg.host_dedx_max = float(args.mnd_host_dedx_max); _mcfg.tip_face_min_cm = float(args.mnd_tip_face_cm)
+                    for _kv in args.mnd_set:
+                        _k, _v = _kv.split("=", 1); _cur = getattr(_mcfg, _k)
+                        setattr(_mcfg, _k, type(_cur)(float(_v)) if isinstance(_cur, (int, float)) and not isinstance(_cur, bool) else (_v.lower() in ("1", "true") if isinstance(_cur, bool) else _v))
                     _mcfg.piece_max_mev = float(args.mnd_piece_max_mev); _mcfg.delay_max = float(args.mnd_delay_max)
                     _mts = np.asarray(ns1["hit_timestamps"], dtype=np.float64).copy(); _mbase = ns1["baseImage"]
                     n_light_ch = int(np.asarray(_mbase).shape[1])

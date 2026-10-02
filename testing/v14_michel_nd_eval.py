@@ -72,7 +72,7 @@ def main():
                     pm["lab"][h] = TMP0 + j; pm["used"][h] = True; pm["want"].add(TMP0 + j); pm["keys"].append((j, k)); passes.append(pm)
             for pm in passes:
                 _, meta = process_clusters_to_imageMaps_streaming(x, y, zz, e.astype(np.float32), tpc, pm["lab"], model=models.light_model, template=tmpl,
-                                                                  batch_size=a.batch, restrict_clusters=pm["want"], device_policy="auto", amplitudes_only=True)
+                                                                  batch_size=a.batch, restrict_clusters=pm["want"], device_policy="auto", amplitudes_only=True, min_prediction_threshold=0.0)
                 amps = {(int(c_), int(t_)): meta["amplitudes"][i] for i, (c_, t_) in enumerate(zip(meta["group_cls"], meta["group_tpcs"]))}
                 pred_t.append(meta["timings"])
                 for j, k in pm["keys"]:
