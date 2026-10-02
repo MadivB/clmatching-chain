@@ -768,6 +768,28 @@ geometry is the prior that pays for the looser light test).  Split gates (pieces
 `--michel-nd --mnd-host-extent-cm 20 --mnd-bragg-end-cm 20 --mnd-piece-max-mev 60 --mnd-delay-max 300 --mnd-batch 16
 --mnd-tip-face-cm 5 --mnd-set band_dedx_max=5 max_frac=1.0 remainder_min_mev=10 mf_min=0.75 apc_max=-0.25 whole_mf_min=0.8
 whole_apc_max=-0.5`, piece predictions with `min_prediction_threshold=0` (harness `_mnd_predict`).
+
+**CERTIFIED (arm V14M2, 63 spills, in-chain, 2026-10-02 13:20-13:55; `testing/v14m_cert_V14M2.log`):**
+
+| | v1.4 (V14A) | v1.4 + stage 4.85 certified gates (V14M) | v1.4 + stage 4.85 revised (V14M2) |
+|---|---|---|---|
+| NS efficiency | 96.89 | 96.92 (+0.028, 38/8) | 96.92 (+0.033 pp, 38/6) |
+| all-TPC accuracy | 95.86 | 95.88 (+0.021, 41/11) | 95.89 (+0.024 pp, 44/9) |
+| LE class | 65.55 | 65.57 | 65.57 |
+| stage 4.85 moves / fixed / broke | | 122 / 1.14 / 0.34 GeV | 126 / 1.30 / 0.37 GeV |
+| probe pieces per spill | | 388 | 209 |
+| stage time per spill, median (p90) | | 10.0 s (14.5) | 7.1 s (9.8) |
+
+V14M2 vs V14M directly: NS +0.005 pp (20/15 spills), all-TPC +0.003 (23/16): the same ledger at 71 % of the stage cost,
+with 0.16 GeV more fixed and 0.03 GeV more broken; pieces fixed 955 / broke 279 MeV (V14M 791 / 245), whole-cluster moves
+identical by construction (34, 345 / 92 MeV).  Wrong energy total 160.63 -> 159.69 GeV (V14M 159.83).  Stage parts:
+dense 1.0, geometry 1.4, perceiver 3.1 + 0.4, scans 1.1 s.  Event median 142.9 s (V14M 143.8; the backbone stage ran
+5 s slower on this node, untouched code).  run_v15.sh carries this configuration; adoption as v1.5 remains the user's
+call (7 s per spill for a Michel class that goes from ~6.5 to ~10 % correctly timed).
+Direct Michel metric (`michel_nd_out/michel_metric_v14m2.log`, 916 Michels, 19.7 GeV): energy correctly timed
+v1.4 33.3 % / V14M 36.5 % / V14M2 37.0 %; delayed 30-100 ticks 12.8 / 16.0 / 17.6 %, 100-300 ticks 11.1 / 18.6 / 18.8 %;
+pion-hosted 17.6 / 20.6 / 21.5 %, muon-hosted 54.7 / 58.4 / 58.4 %; no family within 5 ticks of the Michel flash
+3.7 / 8.0 / 8.6 %; Michels >= 50 % right 19 / 23 / 23 %.
   Speed levers left:
 the perceiver's ~11 ms per piece is per-group overhead (grouping / voxelisation), not GPU compute - a piece-level
 voxeliser that reuses the host cluster's voxel grid, or an amplitude-native (no image) prediction path, would take the

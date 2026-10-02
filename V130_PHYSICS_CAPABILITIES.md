@@ -262,6 +262,9 @@ Event displays of types 1-5: `testing/v12_displays/` (light-vs-prediction, reco 
   track ends, their hosts are stopped pi+ (mu- are captured, rock muons go through), and the "MIP-like isolated stop"
   rule is 4 % Michel. 10 % of the delayed Michel energy sits in a cluster already placed at the Michel's time with the
   host wrong (2 GeV of host energy per 20 spills): the mirror move, host earlier and Michel stays, is an unbuilt lever.
+  The revised stage (local dE/dx, lifted predictor floor, host-remainder rule, looser light gates on Bragg-attached
+  pieces only; certified as arm V14M2 on 2026-10-02) gives 37.0 % of the Michel energy correctly timed, delayed Michels
+  17-19 % in the 30-300 tick range, at 7 s per spill instead of 10, with the same ledger (NS +0.033 pp over v1.4).
 - **Low-energy physics (isolated 1-20 MeV deposits) is the weak point**: interaction-level recovery 32-42 %, hit accuracy
   66-87 %. The measured cause is the light-prediction engine at low energy. A physics goal that rests on isolated
   low-energy blips should plan for the engine retraining first.
