@@ -240,6 +240,13 @@ Event displays of types 1-5: `testing/v12_displays/` (light-vs-prediction, reco 
   +0.028 pp (38/8), all-TPC +0.021 (41/11), 122 moves at 77 % purity, delayed-daughter class ~6 -> ~10 % correctly
   timed. The Bragg attachment is the discriminant the light cannot supply: pieces leaving a Bragg ball are 76-83 %
   pure, other free ends 17 %.
+  **Direct Michel metric (2026-10-02, `testing/v15_michel_metric.py`):** 916 true Michel electrons with >= 1 MeV of
+  charge in the 63 spills (14.5 per spill, 19.7 GeV; 64 % hosted by a stopped pi+ via an invisible 4 MeV mu+, 36 % by
+  a muon; 77 % of the energy merged into the host cluster). Michel energy correctly timed: v1.4 33 %, with the stage
+  37 %; the prompt Michels (delay < 12 ticks, 4.5 GeV) are 95 % correct because they share the host's window, the
+  delayed ones (13.4 GeV) go from 13 % to 17 %; 80 % of the Michel energy sits at the host's time. Michels with no
+  family within 5 ticks of their flash: 4 -> 8 %. This, not the ledger, is the number a kaon / Michel analysis should
+  plan with.
 - **Low-energy physics (isolated 1-20 MeV deposits) is the weak point**: interaction-level recovery 32-42 %, hit accuracy
   66-87 %. The measured cause is the light-prediction engine at low energy. A physics goal that rests on isolated
   low-energy blips should plan for the engine retraining first.

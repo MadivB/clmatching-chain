@@ -655,7 +655,50 @@ fixed 1.14 / broken 0.34 GeV (pieces 791 / 245, whole 345 / 92; purity 0.77), 10
 (v1.4 136).  The ledger gain is small by construction (the delayed-daughter class is 0.64 % of the energy); the product
 is the Michel tag: the class goes from ~6 % to ~10 % correctly timed with 77 % purity on the moves.
 Launcher `run_v15.sh` (v1.5 CANDIDATE = v1.4 + `--michel-nd` with the gates above); adoption as the default is the
-user's call on the time budget (10 s per spill against the 3 s asked for the earlier late stages).  Speed levers left:
+user's call on the time budget (10 s per spill against the 3 s asked for the earlier late stages).
+
+**Track-ending census (2026-10-02, `testing/v15_track_ending_census.py`, truth helper `nd_truth_michel.py`; 20 spills,
+7,566 ends of track clusters >= 10 MeV and >= 15 cm; user's proposal: classify every finished track end as exit /
+Michel / continuation into another TPC / genuine stop, with dE/dx as the proton handle, right after track merging):**
+truth-scored classes: exit (outer face) 18 %, TPC face (continuation into the next module: per-TPC clustering truncates
+every crossing track) 36 %, Michel 0.9 % (68 ends), truncated elsewhere 8 %, touching another cluster 7 %, genuine stop 29 %.
+By particle: muon ends 31 % exit / 61 % TPC face / 0.0 % Michel (mu- are captured on argon; through-going rock muons
+dominate); pion ends 5 % Michel / 19 % stop (absorption); proton ends 41 % stop; e/gamma 61 % stop.  THE MICHEL HOST IN
+THIS MC IS A STOPPED PI+ (16 of the 19 isolated Michel-ended tracks; pi+ -> mu+ at rest -> e+, the 4 MeV muon is
+invisible), not a muon track.  The proposed rule "low dE/dx track, away from any face, nothing attached" selects
+300-1,000 ends per 20 spills of which 2-4 % are Michel ends, 12-19 % truncated, 80-85 % genuine stops (electron
+'tracks', absorbed pions, protons) - as a Michel tag by geometry alone it is 4 % pure; Michel hosts read dE/dx 1.9-2.8
+MeV/cm (MIP) vs 1.9-5.3 for the other stops, Bragg ratio last-5-cm / mid 0.83 (diluted by the Michel's own hits when
+merged) vs 1.08, and only 19 of the 68 Michel ends are isolated (26 within 3 cm of a TPC face, 9 touching another
+cluster).  Michel energy at those ends is 29 % correctly timed with stage 4.85.  So the ending classifier is useful for
+(a) continuation / truncation bookkeeping (TPC faces are 36 % of all ends) and (b) restricting WHERE the Michel stage
+looks (host dE/dx <= 5 MeV/cm, tip >= 5 cm from an outer face: kernel options `host_dedx_max`, `tip_face_min_cm`, being
+measured), but the Michel decision itself needs the delayed light, which is what stage 4.85 tests.
+
+**Direct Michel metric (2026-10-02, `testing/v15_michel_metric.py`; truth = e+- from mu decay incl. brems descendants,
+host = the stopped muon or, when the muon is invisible, its parent pion; 63 spills):** 916 Michel electrons with >= 1 MeV
+of charge (14.5 per spill, 19.7 GeV; KE 23-50 MeV, charge 5-29 MeV); 879 inside the window; 587 (14.8 GeV) merged with
+the host at the front end, 292 own clusters; host = pion 561 (10.4 GeV), muon 317 (8.7 GeV); a family within 5 ticks of
+the Michel time exists for 533 (13.8 GeV), none for 346 (5.3 GeV); a loose waveform peak for 770 (17.5 GeV).
+
+| Michel energy correctly timed (within 10 ticks) | v1.4 | v1.4 + stage 4.85 |
+|---|---|---|
+| all (19.7 GeV) | 33.3 % | 36.5 % |
+| delay 0-12 ticks (4.5 GeV: shares the host's window) | 94.7 % | 95.0 % |
+| delay 12-30 / 30-100 / 100-300 / > 300 ticks | 13 / 13 / 11 / 12 % | 15 / 16 / 19 / 12 % |
+| merged with the host (14.8 GeV) | 33.0 % | 36.9 % |
+| own cluster (4.3 GeV) | 39.8 % | 41.1 % |
+| family within 5 ticks of the Michel time | 46.4 % | 49.3 % |
+| no family within 5 ticks | 3.7 % | 8.0 % |
+| host = muon / host = pion | 54.7 / 17.6 % | 58.4 / 20.6 % |
+| Michels >= 50 % right | 19 % | 23 % |
+
+80 % of the Michel energy sits at the host's time.  The stage's gain on the delayed Michels (> 12 ticks, 13.4 GeV) is
+13 -> 17 %, against 17 -> 36 % for the 2x2 stage M on its Michels: ND pile-up (a family within 5 ticks of most Michel
+flashes), the 17 % model systematics that forced the purity gates, and the pion-hosted majority (short, often < 20 cm,
+hosts) are the differences.  A per-Michel recall audit through the stage (which gate loses each Michel) is the next
+measurement (kernel `debug_tag` / `debug_out` hook).
+  Speed levers left:
 the perceiver's ~11 ms per piece is per-group overhead (grouping / voxelisation), not GPU compute - a piece-level
 voxeliser that reuses the host cluster's voxel grid, or an amplitude-native (no image) prediction path, would take the
 stage to ~4 s; restricting hosts to track-type clusters does not pay (37 of 85 true Michel hosts are typed 'cluster').
