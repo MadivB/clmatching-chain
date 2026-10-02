@@ -35,6 +35,7 @@ class MichelNDConfig:
     support_frac = 0.9; require_bragg = True; min_tpc_hits = 6; host_extent_min_cm = 0.0; bragg_end_cm = 1e9; vox_cm = 1.0
     band_cm = 10.0; band_dedx_max = 1e9      # local host dE/dx: energy in the band_cm of track just behind the Bragg stop (geodesic from the tip) / band_cm
     remainder_min_mev = 0.0                  # piece growth also stops when the host remainder in the TPC would fall below this (a Michel may out-weigh a short pion host)
+    whole_mf_min = None; whole_apc_max = None  # light gates for whole-cluster hypotheses (None = same as the pieces; a Bragg-attached piece carries a physics prior a whole small cluster lacks)
     unexpl_gain_tol = 0.3; unexpl_min_frac = 0.1   # light at the destination must stay >= this fraction of the actual after the placed families may scale up by gain_tol
     whole_alpha_hi = 2.0                            # whole-cluster moves: amplitude ratio cap (bad whole moves read alpha 2.3-3.3)
     host_dedx_max = 1e9        # mean dE/dx of the host in the TPC (E / geodesic extent, MeV/cm); Michel hosts read 1.9-3.6 (stopping mu / pi)
@@ -284,7 +285,8 @@ def run_michel_nd(*, xyz, e, tpc, labels, ts, amp, actual, base, veto, ceil, tem
         unexpl = float(np.clip(r_u - g_u * F_u, 0, None).sum() / max(a_u, 1e-9))
         E_p = float(e[hits_p].sum())
         pfrac = float(Sp[sup].sum() / max(own_c[sup].sum(), 1e-9)) if sup.size else np.nan
-        passes = (mf >= cfg.mf_min and cfg.alpha_lo <= alpha <= (cfg.whole_alpha_hi if whole else cfg.alpha_hi) and np.isfinite(apc) and apc <= cfg.apc_max
+        mf_min_ = (cfg.whole_mf_min if (whole and cfg.whole_mf_min is not None) else cfg.mf_min); apc_max_ = (cfg.whole_apc_max if (whole and cfg.whole_apc_max is not None) else cfg.apc_max)
+        passes = (mf >= mf_min_ and cfg.alpha_lo <= alpha <= (cfg.whole_alpha_hi if whole else cfg.alpha_hi) and np.isfinite(apc) and apc <= apc_max_
                   and sat <= cfg.sat_max and cov >= cfg.cov_min and E_p >= cfg.piece_min_mev and unexpl >= cfg.unexpl_min_frac)
         return dict(mf=mf, alpha=alpha, apc=apc, sat=sat, cov=cov, unexpl=unexpl, E_p=E_p, ok=passes, Sg=Sg, Sp=Sp, tf=tf, hits=hits_p, pfrac=pfrac, n_sup=int(sup.size))
 

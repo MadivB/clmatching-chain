@@ -1,6 +1,10 @@
 #!/bin/bash
 # v1.5 CANDIDATE (2026-10-02) = v1.4 chain (run_v14.sh) + stage 4.85 Michel / delayed-daughter re-timing (testing/michel_nd.py):
 #   --michel-nd ...   piece-first: Bragg-attached end pieces (free tip whose geodesic growth is stopped by a Bragg ball
+#                     2026-10-02 recall-audit configuration: tip >= 5 cm from the outer face, local band dE/dx <= 5 MeV/cm behind
+#                     the Bragg stop (replaces the cluster E/extent cap), host-remainder rule (piece may out-weigh a short pion host, host
+#                     remainder >= 10 MeV), piece light gates mf 0.75 / apc -0.25 (whole clusters keep 0.8 / -0.5), piece predictions not
+#                     zeroed below 100 ADC; kernel on the v1.4 dumps: 115 moves, fixed 1.27 / broke 0.27 GeV, purity 0.82, 6.6 s/spill
 #                     within 16 cm) of clusters >= 10 MeV with geodesic extent >= 20 cm and the Bragg ball within 20 cm of a
 #                     host end, pieces 5-60 MeV, plus whole templated clusters 5-80 MeV; one batched perceiver call for the
 #                     probe pieces; matched-filter scan of each piece's light over 12-300 ticks later; gates mf >= 0.8,
@@ -64,6 +68,7 @@ V15="--backbone stack2 --merge-p2 --sigma-mode poisson --max-clip-ticks 4 \
 --precision --precision-rounds 3 --precision-calib $HERE/testing/v120_calib_lowi.json --precision-pieces \
 --v200-min-e 20 --force-light-cm 20 --resid-fill \
 --michel-nd --mnd-host-extent-cm 20 --mnd-bragg-end-cm 20 --mnd-piece-max-mev 60 --mnd-delay-max 300 --mnd-batch 16 \
+--mnd-tip-face-cm 5 --mnd-set band_dedx_max=5 max_frac=1.0 remainder_min_mev=10 mf_min=0.75 apc_max=-0.25 whole_mf_min=0.8 whole_apc_max=-0.5 \
 --subtick --conf-cluster --light-ckpt $SMALL --frontend-repo $FRONTEND"
 
 mkdir -p "$OUT"

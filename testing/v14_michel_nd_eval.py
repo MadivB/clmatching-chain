@@ -28,7 +28,7 @@ def main():
     a = ap.parse_args(); cfg = MichelNDConfig()
     for kv in a.set:
         k, v = kv.split("="); cur = getattr(cfg, k)
-        setattr(cfg, k, type(cur)(float(v)) if isinstance(cur, (int, float)) and not isinstance(cur, bool) else (v.lower() in ("1", "true") if isinstance(cur, bool) else v))
+        setattr(cfg, k, float(v) if cur is None else (type(cur)(float(v)) if isinstance(cur, (int, float)) and not isinstance(cur, bool) else (v.lower() in ("1", "true") if isinstance(cur, bool) else v)))
     files = sorted(glob.glob(os.path.join(a.dump_dir, "full_dumps", "*.npz")))
     if a.files:
         tags = a.files.split(","); files = [f for f in files if any(os.path.basename(f).startswith(t) for t in tags)]

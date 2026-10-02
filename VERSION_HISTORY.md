@@ -754,6 +754,20 @@ Offline gate scan (probe-level emulation, extent 20, face 5): mf 0.8 / apc -0.5 
 right; mf 0.75 / apc -0.25 net +0.43 at 0.72 right with 50 % more Michel energy in the moves; unexpl higher = purer and
 smaller; alpha bounds irrelevant.  The light gates sit on a plateau; the recall ceiling is geometry (candidate
 generation) and ND pile-up, not the gate values.
+
+Round 4 (kernel, 63 spills, band 5 / extent 20 / face 5 / un-zeroed): host-remainder rule (piece growth limited by
+"host remainder >= 10 MeV" instead of "piece < 50 % of the cluster"; a Michel may out-weigh a short pion host) 81 moves,
+0.97 / 0.14, purity 0.87, 6.4 s (neutral, cleaner); Bragg-end 40 cm identical to 20; light gates mf 0.75 / apc -0.25 on
+everything 150 moves, 1.46 / 0.46, purity 0.76, delayed class 10.2 %: the 35 extra WHOLE-cluster moves are 50 % pure
+(net 0.00: a small cluster carries no Michel prior), the 42 extra PIECE moves 69 % pure (net +0.19: the Bragg-attached
+geometry is the prior that pays for the looser light test).  Split gates (pieces 0.75 / -0.25, wholes 0.8 / -0.5):
+**115 moves (24 whole), fixed 1.27 / broke 0.27 GeV, net +1.00, purity 0.82, 41 / 7 spills, delayed class 6.5 -> 10.1 %,
+6.6 s per spill** (`kern_63_split.log`) against the certified V14M kernel 108 moves, 1.09 / 0.25, 8.5 s on the same dumps.
+
+**v1.5 configuration (run_v15.sh, arm V14M2 = `testing/sbatch_v14m_V14M2.sh`, certification launched 2026-10-02 13:20):**
+`--michel-nd --mnd-host-extent-cm 20 --mnd-bragg-end-cm 20 --mnd-piece-max-mev 60 --mnd-delay-max 300 --mnd-batch 16
+--mnd-tip-face-cm 5 --mnd-set band_dedx_max=5 max_frac=1.0 remainder_min_mev=10 mf_min=0.75 apc_max=-0.25 whole_mf_min=0.8
+whole_apc_max=-0.5`, piece predictions with `min_prediction_threshold=0` (harness `_mnd_predict`).
   Speed levers left:
 the perceiver's ~11 ms per piece is per-group overhead (grouping / voxelisation), not GPU compute - a piece-level
 voxeliser that reuses the host cluster's voxel grid, or an amplitude-native (no image) prediction path, would take the
