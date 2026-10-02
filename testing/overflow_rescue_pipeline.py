@@ -754,6 +754,13 @@ def main() -> int:
     ap.add_argument("--rf-dcos", type=float, default=0.1); ap.add_argument("--rf-ratio-hi", type=float, default=3.0)
     ap.add_argument("--rf-tail", type=float, default=0.5); ap.add_argument("--rf-host-min", type=float, default=20.0)
     ap.add_argument("--rf-mode", default="sup"); ap.add_argument("--rf-kprom", type=float, default=10.0)
+    ap.add_argument("--michel-nd", action="store_true",
+                    help="stage 4.85 (testing/michel_nd.py): piece-first Michel / delayed-daughter re-timing - Bragg-attached end "
+                         "pieces and small whole clusters get their own later flash when the perceiver light of the piece matches "
+                         "the residual there and the prompt shows the deficit (user 2026-10-02); after 4.8, before 4.9")
+    ap.add_argument("--mnd-host-extent-cm", type=float, default=0.0); ap.add_argument("--mnd-bragg-end-cm", type=float, default=1e9)
+    ap.add_argument("--mnd-piece-max-mev", type=float, default=1e9); ap.add_argument("--mnd-delay-max", type=float, default=300.0)
+    ap.add_argument("--mnd-batch", type=int, default=64)
     ap.add_argument("--force-light-cm", type=float, default=None,
                     help="stage 4.9 variant (force_light_vote.py): cluster-density vote for noise hits beyond 3 cm, "
                          "multiplied by the positive light residual on the 6 nearest channels for hits farther than "
@@ -2523,6 +2530,50 @@ def main() -> int:
                           f"{st_rf['time_s']:.2f}s", flush=True)
                     tim["after_resid_fill"] = time.time() - t_ev
                     _evo("4.8_resid_fill", ns1["hit_timestamps"])
+                # ---------- STAGE 4.85: Michel / delayed-daughter re-timing (piece-first) ----------
+                if args.michel_nd:
+                    if _HERE not in sys.path:
+                        sys.path.insert(0, _HERE)
+                    from michel_nd import run_michel_nd, MichelNDConfig
+                    from M5p1.first_stage_matching.streaming_prediction import process_clusters_to_imageMaps_streaming as _mnd_pred
+                    _mimg = ns1["imageMaps"]
+                    _mamp = {(int(L), int(c)): np.asarray(im, np.float64).max(axis=1) for (L, c), im in _mimg.items() if 0 <= int(c) < n_light}
+                    _mx = np.asarray(ns1["xset"], np.float32); _my = np.asarray(ns1["yset"], np.float32); _mz = np.asarray(ns1["zset"], np.float32)
+                    _me = np.asarray(ns1["Eset"], np.float32); _mtpc = np.asarray(ns1["hitTPCid"]).astype(np.int64); _mlab = np.asarray(ns1["labels_global"]).astype(np.int64)
+                    _mtmpl = np.asarray(models.waveform_template, np.float64) if hasattr(models, "waveform_template") else None
+
+                    def _mnd_predict(items):
+                        """items: [(key, hit indices)] -> {key: amp pattern}; hits of one spill may overlap between items -> passes"""
+                        out = {}; passes = []
+                        for j, (k, h) in enumerate(items):
+                            for pm in passes:
+                                if not pm["used"][h].any():
+                                    pm["lab"][h] = 1_000_000 + j; pm["used"][h] = True; pm["want"].add(1_000_000 + j); pm["keys"].append((j, k)); break
+                            else:
+                                pm = {"lab": np.full(_mlab.size, -1, np.int64), "used": np.zeros(_mlab.size, bool), "want": set(), "keys": []}
+                                pm["lab"][h] = 1_000_000 + j; pm["used"][h] = True; pm["want"].add(1_000_000 + j); pm["keys"].append((j, k)); passes.append(pm)
+                        for pm in passes:
+                            _, meta = _mnd_pred(_mx, _my, _mz, _me, _mtpc, pm["lab"], model=models.light_model, template=_mtmpl, batch_size=int(args.mnd_batch),
+                                                restrict_clusters=pm["want"], device_policy="auto", amplitudes_only=True)
+                            amps = {(int(c_), int(t_)): meta["amplitudes"][i] for i, (c_, t_) in enumerate(zip(meta["group_cls"], meta["group_tpcs"]))}
+                            for j, k in pm["keys"]:
+                                v = amps.get((1_000_000 + j, k[1])); out[k] = np.asarray(v, np.float64) if v is not None else np.zeros(n_light_ch)
+                        return out
+                    _mnd_T = np.load(os.path.join(BASE_DIR, "assets", "avg_pulse.npy")).astype(np.float64).ravel(); _mnd_T = _mnd_T / _mnd_T.max()
+                    _mcfg = MichelNDConfig(); _mcfg.host_extent_min_cm = float(args.mnd_host_extent_cm); _mcfg.bragg_end_cm = float(args.mnd_bragg_end_cm)
+                    _mcfg.piece_max_mev = float(args.mnd_piece_max_mev); _mcfg.delay_max = float(args.mnd_delay_max)
+                    _mts = np.asarray(ns1["hit_timestamps"], dtype=np.float64).copy(); _mbase = ns1["baseImage"]
+                    n_light_ch = int(np.asarray(_mbase).shape[1])
+                    st_m = run_michel_nd(xyz=np.stack([_mx, _my, _mz], 1).astype(np.float64), e=_me, tpc=_mtpc, labels=_mlab, ts=_mts, amp=_mamp,
+                                         actual=np.asarray(ns1["fullLightWaveform"], np.float32), base=_mbase, veto=veto_mask, ceil=sat_ceil,
+                                         template=_mnd_T, predict_fn=_mnd_predict, cfg=_mcfg, truth_t0=truth_t0, apply=True)
+                    ns1["hit_timestamps"] = _mts.astype(np.asarray(ns1["hit_timestamps"]).dtype)
+                    mv = st_m.pop("moves"); p3_row["michel_nd"] = st_m
+                    p3_row["michel_nd_moves"] = [{k: v for k, v in m.items() if k != "hits"} for m in mv]
+                    print(f"  [4.85 michel] pieces {st_m['n_cand']} wholes {st_m['n_whole']} predictions {st_m['n_pred']} moves {st_m['n_moves']} "
+                          f"({st_m['e_moved']:.0f} MeV) fixed/broke {st_m.get('fixed_e', 0):.0f}/{st_m.get('broke_e', 0):.0f} MeV, {st_m['time_s']:.1f}s {st_m['tim']}", flush=True)
+                    tim["after_michel_nd"] = time.time() - t_ev
+                    _evo("4.85_michel_nd", ns1["hit_timestamps"])
                 # ---------- STAGE 4.9: force coverage ----------
                 if args.force_coverage:
                     if _HERE not in sys.path:

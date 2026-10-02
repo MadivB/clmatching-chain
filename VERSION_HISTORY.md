@@ -585,6 +585,56 @@ version needs the probe-only pass, fewer candidate flashes and a cheaper piece l
 10-20 s per spill target, i.e. a budget decision.  Scripts: testing/v14_michel_nd.py (stage + labelling),
 v14_michel_nd_gatescan.py, v14_michel_nd_report.py, michel_nd_round2b.sh; outputs testing/michel_nd_out/.
 
+**Piece-first rewrite (2026-10-02, `testing/v14_michel_nd_fast.py`)** - user: 100 s is far too much, inject physics,
+Michels are critical.  Physics injected: a Michel is a short branch (5-55 MeV, <= 16 cm) that LEAVES the Bragg peak at
+the end of a stopping muon and has its own flash 12-900 ticks later.  Order inverted: (1) dense points; (2) candidate
+pieces = free tips of clusters >= 10 MeV whose geodesic growth is STOPPED by a dense ball within 16 cm ("bragg"), plus
+whole templated clusters 5-80 MeV; (3) ONE batched perceiver call for the probe pieces (L <= 5 cm); (4) per piece a
+matched-filter scan (FFT) of its pattern over all later times in its TPC on the residual with its prompt light removed,
+best 2 minima = its candidate flashes; mf / alpha / apc / cov / sat at those; gates mf >= 0.8, alpha 0.8-6, apc <= -0.5,
+sat <= 0.5, cov >= 0.2, piece >= 5 MeV, delay <= 300 ticks; (5) passing probes refined over all lengths (second small
+batch), fullest within 0.02 of the best mf; one move per cluster.  Same 13 spills (file 1), apply mode:
+
+| variant | moves | fixed / broken [GeV] | net | purity | spills +/- | s per spill (dense / geometry / perceiver / scan) |
+|---|---|---|---|---|---|---|
+| flash-first round 2 (above) | 50 | 0.47 / 0.25 | +0.22 | 0.65 | | 100 |
+| piece-first, Bragg required | 37 (30 pieces + 7 whole) | 0.44 / 0.10 | +0.34 | 0.81 | 9 / 3 | 13.5 (1.2 / 2.1 / 7.8+0.4 / 1.5) |
+| piece-first, any free tip | 50 | 0.47 / 0.30 | +0.17 | 0.61 | 8 / 5 | 22.9 |
+
+Pieces leaving a Bragg ball: 304 / 98 MeV (purity 0.76); pieces from other free ends: 42 / 209 MeV (0.17) - the Bragg
+attachment IS the Michel discriminant that the light cannot provide; whole-cluster moves ~136 / 2 MeV.  Delayed class on
+these spills 5.0 -> 9.7 % (same as flash-first) at 8x less cost and twice the purity.  Remaining cost is the perceiver on
+~600 probe pieces per spill (7.8 s); physics gates on the host (geodesic extent >= 20 cm, Bragg ball within 20 cm of a
+host end, piece <= 60 MeV) measured on the same 13 spills: 28 moves (20 pieces + 8 whole), fixed 0.38 / broken 0.08 GeV,
+net +0.30, purity 0.83 (pieces 0.76, whole clusters 156 / 5 MeV = 0.97), 10.0 s per spill (perceiver 4.8 s on ~400
+probe pieces, geometry 2.2, dense points 1.2, scans 1.1).
+Piece-first (Bragg required, ungated) on dev / holdout: files 1-3 (39 spills) 109 moves (89 pieces + 20 whole), fixed
+1.04 / broken 0.44 GeV, net +0.59, purity 0.70, spills 29 / 9, delayed class 5.1 -> 10.7 %; files 4-5 (24 spills) 77
+moves (51 + 26), 0.47 / 0.33, net +0.14, purity 0.59, 15 / 8, class 7.7 -> 9.9 % (file 5 net -30 MeV).  Same physics as
+flash-first on the same spills (1.12 / 0.52 and 0.53 / 0.30) at 13 s instead of 100 s per spill.  Host properties do not
+separate good from bad pieces (in-TPC energy, extent, linear density, type: purity stays 0.63-0.69 under any cut); the
+gates mf / apc / alpha do not either inside the passing set.  What does: (a) the GAIN-CORRECTED UNEXPLAINED LIGHT at the
+destination (placed families allowed a 30 % under-prediction; what remains >= 10 % of the actual): pieces 0.63 -> 0.72
+purity, net +461 -> +616 MeV on the 140 dev+holdout pieces - bad moves land on other families' systematics deficits;
+(b) whole-cluster moves with alpha <= 2: purity 0.76 -> 0.85.  Both folded into the production kernel
+`testing/michel_nd.py` (`run_michel_nd`, `MichelNDConfig`; harness flag `--michel-nd`, stage 4.85 after 4.8 / before 4.9),
+evaluated by `v14_michel_nd_eval.py`.  Speed: dense points vectorised (1.9 -> 1.4 s), skeleton on 1-cm voxel
+representatives (2.9 -> 1.1 s, same tips); the perceiver batch size does not matter (per-cluster overhead), so the
+remaining lever is the probe-piece count; physics gates on the host (extent >= 20 cm, Bragg within 20 cm of a host end,
+piece <= 60 MeV) cut the pieces ~2x at a 10-20 % loss of fixes.
+Host gates on dev (39 spills): 80 moves, 0.81 / 0.20 GeV, net +0.60 (= ungated), purity 0.70 -> 0.80, 25 / 6, 8.1 s per spill;
+holdout 66 moves, 0.43 / 0.27, net +0.16, purity 0.62, 16 / 6.
+PRODUCTION KERNEL (`testing/michel_nd.py`, all gates: host extent >= 20 cm, Bragg ball within 20 cm of a host end, piece
+5-60 MeV, delay 12-300 ticks, mf >= 0.8, alpha 0.8-6 (whole clusters <= 2), apc <= -0.5, sat <= 0.5, cov >= 0.2, gain-corrected
+unexplained light at the destination >= 10 % of the actual) on dev: 64 moves (51 pieces + 13 whole), fixed 0.74 / broken
+0.11 GeV, net +0.63, PURITY 0.87 (pieces 0.83, whole clusters 1.00), spills 27 / 4, delayed class 5.1 -> 9.4 %, 8.3 s per
+spill (perceiver 4.2 s on ~400 probe pieces at ~11 ms each - voxelisation / per-cluster overhead, independent of batch
+size and of materialising the image maps, which the new `amplitudes_only` option of
+`process_clusters_to_imageMaps_streaming` skips).  In-chain smoke (harness flag `--michel-nd`, stage 4.85, file 1
+events 0 and 8): 7 moves, 6 right, all-TPC +0.12 pp on both spills, 8-15 s.  Holdout of the kernel and the 5-file
+certification V14M = v1.4 + `--michel-nd --mnd-host-extent-cm 20 --mnd-bragg-end-cm 20 --mnd-piece-max-mev 60`
+(`testing/sbatch_v14m_V14M.sh`, reference V14A) running.
+
 ### v1.4 ADOPTED 2026-10-01 = v1.3 + stage 4.9 light-vote force (20 cm) + stage 4.8 residual-flash filling (tag CLMatching_v1.4)
 
 5-file certification, arm V14A vs V2A5 (v1.3), 63 paired spills, in-chain (`testing/sbatch_v14_V14A.sh`,
