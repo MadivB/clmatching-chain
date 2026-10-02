@@ -522,6 +522,69 @@ along n (beam-direction prior; the fitted apex is unreliable).  Two measured fac
     interactions: P = 4923, |R| = 0.77.  => for DATA the projection is the right operation; for this MC any
     comb study must either stay unprojected on contained interactions or apply the emulated shift.
 
+### ND Michel / delayed-daughter stage: port of the 2x2 stage M (started 2026-10-01, in progress)
+*(user: Michel electrons must be characterised for the stopped-kaon study; see the 2x2 handoff
+/pscratch/sd/y/yuxuan/2x2QLMatching/spine_kaon/centirun7/kaon_light/HANDOFF_CLM_stopped_kaons.md)*
+
+Status of that handoff on the 2x2 side (done by the 2x2-project session, v2.0_alpha_12/DESIGN_v2.0_alpha_12.md):
+Task A = stage M (QLMatching2x2/assoc_michel_2x2.py): unexplained late waveform-finder flashes -> end pieces of
+clusters from free tips bounded by dense points (Bragg peaks / vertices) -> perceiver light of the piece -> gates
+mf (pattern at the flash) >= 0.8, alpha 0.8-3, apc (PROMPT DEFICIT = projection of the piece's prompt pattern on the
+current residual; ~ -1 absent, ~ 0 present) <= -0.5, sat <= 0.5, cov >= 0.1, L <= 16 cm.  Full K -> mu nu list (1,264
+events): Michel within 5 ticks 16.9 -> 35.7 % (merged 6.6 -> 30.3 %), K+ unchanged, mu+ -0.5 (muon-end false
+pieces); 10-file production gate 98.483 -> 98.524 %, arm alpha13.  Task B: truth-piece K/mu timing resolution 11.8 ns
+= the lifetime, unbiased, statistical recovery only; reco pieces at the stopping point not attempted.  Not yet in the
+release repo; no K/mu precision display yet.
+
+ND port (`testing/v14_michel_nd.py`, GPU, offline on the v1.4 cert dumps; `run_michel_nd.sh`, `run_michel_nd_devhold.sh`,
+gate scan `v14_michel_nd_gatescan.py`, outputs `testing/michel_nd_out/`): late flashes = residual flashes (stage-4.8
+finder, tail 0.5) with unexplained fraction >= 0.2 and >= 2000 ADC; candidates = clusters > 12 ticks earlier with
+whole-pattern cosine >= 0.25 at the flash (top 3); hypotheses = whole cluster (5-80 MeV) or end pieces (free tips,
+dense points, L 2-16 cm, <= 50 % of the cluster); piece light from the small4x perceiver (amp pattern x template);
+scores mf / alpha / apc / sat / cov as in 2x2 with Poisson weights and the per-channel saturation ceiling.
+Labelled sample, 13 spills (file 1): 7,298 hypotheses, 104 true (>= 50 % of the piece energy at the flash time,
+1.01 GeV) vs 6,903 currently-right pieces (83 GeV).  The discriminants transfer: mf true median 0.91 vs 0.59; alpha
+2.33 vs 0.11; apc -1.88 vs +0.22 (2x2: -1.85 vs +1.94); cov 0.35 vs 0.88.  With the 2x2 v2 gates 32.7 % of the true
+hypotheses pass (0.51 GeV) and 0.3 % of the currently-right ones (0.22 GeV).  Simulated selection (gate scan):
+2x2 gates 184 good / 49 bad MeV in 13 moves; mf >= 0.9 and apc <= -0.3: 168 / 0 in 7 moves; no apc gate: 233 / 157.
+Cost offline ~20 s per spill (300-500 perceiver piece predictions).  Applied on the same 13 spills with the 2x2 gates:
+13 moves, correctly timed energy 49 -> 184 MeV (fixed 0.18, broken 0.05 GeV) = the simulation exactly.
+BUT the stage-4.8 residual-flash finder reaches only 9 % of the ND delayed-daughter energy (4.04 GeV in these 13
+spills, 5 % correct): 65 % of the delayed pieces' true flashes lie within 5 ticks of an EXISTING family time (part of
+the Michel, or another deposit, is already placed there) and most sit on their host's tail (residual / model median
+0.21), both of which that finder rejects by design.  Round 2 therefore takes the candidate late times from the TPC's
+family times + 10-sigma residual peaks, kept when the light there is unexplained after allowing the placed families a
+30 % under-prediction (gain-corrected residual >= 10 % of the actual and >= 5000 ADC; a plain 20 % test passes nearly
+every family time at ND's systematics), capped at 8 per TPC: 64 % of the delayed energy passes this test at its true
+time; ~100 s per spill offline (1,500-2,200 piece predictions).  Labelled sample, 13 spills: 47,120 hypotheses, 579
+true (5.5 GeV, nested) vs 45,242 currently right (554 GeV); mf true 0.81 vs 0.62, apc -1.04 vs +0.16, alpha 1.49 vs
+0.30.  Simulated selection, 2x2 gates: 52 moves, 497 good / 239 bad MeV; no apc gate: 617 / 1,075 (apc is again the
+decisive gate).  The bad moves are END PIECES OF BIG CLUSTERS (host median 384 MeV vs 70 for good moves, piece
+fraction 2 % vs 31 %, mf 0.85 vs 0.93) matched to another family's unexplained residual - the ND analogue of the 2x2
+muon-end false pieces; a host-energy cap on end-piece moves removes them: host <= 150 MeV 381 / 77 MeV in 28 moves,
+host <= 100 MeV 301 / 8 in 21 moves.
+DEV RESULT (files 1-3, 39 spills, gates mf >= 0.8, alpha 0.8-6, apc <= -0.5, cov >= 0.2, unexplained >= 10 %; `michel_nd_out/dev2_A.json`):
+144 moves (130 end pieces, 14 whole clusters), fixed 1.12 GeV, broken 0.52 GeV, net +0.60 GeV, spills better / worse
+27 / 10, every file positive (+222 / +176 / +204 MeV); the delayed-daughter class (11.7 GeV in these spills) goes from
+5.1 % to 11.1 % correctly timed; moved energy 0.70 GeV inside the class, 1.87 GeV outside it.  By piece energy:
+< 5 MeV pieces are 77 % wrong (net -67 MeV), 5-20 MeV 71 % right (+593), 20-100 MeV 56 % right (+75); by delay:
+12-30 ticks 75 % right, 30-100 65 %, 100-300 60 %, > 300 ticks 32 % (net -40; other interactions' families).  The
+host-energy cap seen on file 1 does not pay on files 2-3 (it removes good moves too).  Post-filters chosen on dev:
+piece >= 5 MeV and delay <= 300 ticks -> 96 moves, 1,015 / 323 MeV (net +692, purity 0.76); with a 200 MeV host cap
+on end pieces 70 moves, 821 / 205 (purity 0.80).  Cost 100 s per spill offline.
+HOLDOUT (files 4-5, 24 spills, same gates, `michel_nd_out/hold2_A.json`): 97 moves, fixed 0.53 / broken 0.30 GeV
+(net +0.23), spills 17 / 7, both files positive (+171 / +63 MeV); delayed class 12.9 GeV 7.7 -> 10.4 % correct.  With
+the dev-chosen post-filter (piece >= 5 MeV, delay <= 300 ticks): 48 moves, 423 / 164 MeV, purity 0.72 (dev 0.76); the
+host cap does not transfer (holdout 247 / 100).  OVER THE 63 SPILLS with the post-filter: 144 moves, fixed 1.44 GeV,
+broken 0.49 GeV, net +0.95 GeV (~ +0.025 pp all-TPC), purity 0.75; the delayed-daughter class (24.6 GeV = 0.64 % of the
+energy) goes from 6.4 % to 10.7 % correctly timed - a quarter of what the light reaches, against 36 % of the Michel
+energy for the 2x2 stage (16.9 -> 35.7 %): ND pile-up puts another family within 5 ticks of most Michel flashes and the
+17 % model systematics blunt the prompt-deficit test (apc true -1.0 vs right +0.2, against -1.9 vs +1.9 in 2x2).
+NOT adopted: 100 s per spill offline (1,500-2,200 perceiver piece predictions) against the 3 s budget; an in-chain
+version needs the probe-only pass, fewer candidate flashes and a cheaper piece light (amp-native prediction) - a
+10-20 s per spill target, i.e. a budget decision.  Scripts: testing/v14_michel_nd.py (stage + labelling),
+v14_michel_nd_gatescan.py, v14_michel_nd_report.py, michel_nd_round2b.sh; outputs testing/michel_nd_out/.
+
 ### v1.4 ADOPTED 2026-10-01 = v1.3 + stage 4.9 light-vote force (20 cm) + stage 4.8 residual-flash filling (tag CLMatching_v1.4)
 
 5-file certification, arm V14A vs V2A5 (v1.3), 63 paired spills, in-chain (`testing/sbatch_v14_V14A.sh`,

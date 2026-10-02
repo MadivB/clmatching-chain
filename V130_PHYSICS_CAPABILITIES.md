@@ -228,7 +228,11 @@ Event displays of types 1-5: `testing/v12_displays/` (light-vs-prediction, reco 
   measurement at 1 m for pieces the light resolves, and unmeasurable for the sub-5 MeV blips that dominate neutron
   deposits (they are placed by geometry, 66-72 % correct). Budget accordingly.
 - **Delayed-daughter (Michel) tagging is a potential, not a delivered capability**: the daughter's flash is in the light
-  residual 96-99 % of the time, but the chain gives it the parent's time today.
+  residual 96-99 % of the time, but the chain gives it the parent's time today. A port of the 2x2 Michel stage
+  (unexplained late flash -> end piece of a cluster bounded by Bragg points -> perceiver light -> prompt-deficit gate;
+  testing/v14_michel_nd.py, 2026-10-01) raises the correctly timed share of that class from 6.4 % to 10.7 % on the 63
+  certified spills at 75 % purity (1.44 GeV fixed, 0.49 broken), but costs 100 s per spill offline and is not in the
+  chain; 65 % of ND Michel flashes coincide with another family within 5 ticks, which is what limits it (VERSION_HISTORY).
 - **Low-energy physics (isolated 1-20 MeV deposits) is the weak point**: interaction-level recovery 32-42 %, hit accuracy
   66-87 %. The measured cause is the light-prediction engine at low energy. A physics goal that rests on isolated
   low-energy blips should plan for the engine retraining first.
