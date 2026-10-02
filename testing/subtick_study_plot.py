@@ -30,6 +30,8 @@ plt.rcParams.update({"font.family": "DejaVu Sans", "font.size": 12,
 
 def load_arms(outdir, keys):
     arrs = {k: [] for k in keys}
+    ok_e = {k: 0.0 for k in keys}
+    tot_e = 0.0
     for sf in sorted(glob.glob(f"{outdir}/dumps/*.npz")):
         sd = np.load(sf)
         if "ts_grid" in sd.files and sd["ts_grid"].size == 0:
@@ -37,15 +39,24 @@ def load_arms(outdir, keys):
         tru = sd["truth"].astype(np.float64)
         tb = sd["ts_before"].astype(np.float64)
         core = (np.isfinite(tru) & np.isfinite(tb) & (tb >= 0)
-                & (np.abs(tb - tru) <= 2.0))
+                & (np.abs(tb - tru) <= WIN))
+        has = np.isfinite(tru)
+        tot_e += float(has.sum())
         for k in keys:
             v = sd[k].astype(np.float64)
             arrs[k].append((v - tru)[core])
-    return {k: np.concatenate(v) for k, v in arrs.items() if v}
+            asn = has & np.isfinite(v) & (v >= 0)
+            ok_e[k] += float((asn & (np.abs(v - tru) <= WIN)).sum())
+    out = {k: np.concatenate(v) for k, v in arrs.items() if v}
+    out["_acc"] = {k: 100.0 * ok_e[k] / max(tot_e, 1e-9) for k in keys}
+    return out
+
+
+WIN = 5.0
 
 
 def mu_sig(r):
-    m = np.abs(r) <= 2.0
+    m = np.abs(r) <= WIN
     return 16.0 * float(r[m].mean()), 16.0 * float(r[m].std())
 
 
@@ -55,18 +66,21 @@ def main(d05, d20=None):
 
     arms = [("Alpha Release: integer fit only", a["ts_before"], "#9aa3ad"),
             ("0.25-tick discrete argmin", a["ts_grid"], "#9fc5e8"),
-            ("v1.0 release: quadratic minimum", a["ts_after"], "#0e8fa0"),
-            ("per-cluster quadratic fit", a["ts_perclu"], "#b5307a")]
+            ("v1.0 release: quadratic minimum", a["ts_after"], "#0e8fa0")]
     fig, ax = plt.subplots(figsize=(10.5, 6.6))
-    bins = np.arange(-2, 2 + 0.0625, 0.125)
+    bins = np.arange(-WIN, WIN + 0.015625, 0.03125)
+    keymap = {"Alpha Release: integer fit only": "ts_before",
+              "0.25-tick discrete argmin": "ts_grid",
+              "v1.0 release: quadratic minimum": "ts_after"}
     for name, r, col in arms:
         mu, sg = mu_sig(r)
-        ax.hist(r[np.abs(r) <= 2], bins=bins, histtype="step", lw=2.2,
-                color=col,
-                label=f"{name:31s} \u03bc = {mu:+5.2f} ns   \u03c3 = {sg:5.2f} ns")
+        ax.hist(r[np.abs(r) <= WIN], bins=bins, histtype="step", lw=2.2,
+                color=col, density=True,
+                label=(f"{name:31s} \u03bc = {mu:+5.2f} ns   "
+                       f"\u03c3 = {sg:5.2f} ns"))
     ax.axvline(0, color=INK, lw=0.8, ls=":")
     ax.set_xlabel("reco t0 \u2212 truth t0   (ticks, 1 tick = 16 ns)", color=INK)
-    ax.set_ylabel("hits", color=INK)
+    ax.set_ylabel("density", color=INK)
     ax.set_title("v1 upgrade: discrete vs. continuous minimum",
                  fontsize=14, fontweight="bold", color=INK)
     ax.legend(loc="upper left", prop={"family": "DejaVu Sans Mono", "size": 9.5})

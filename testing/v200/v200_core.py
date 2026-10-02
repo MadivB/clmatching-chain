@@ -45,12 +45,17 @@ USE_SUP = os.environ.get("V200_SUP", "0") not in ("", "0")   # 1: a cluster's ow
 BLIND_F = float(os.environ.get("V200_BLIND", "0"))   # >0: a cluster whose own light is below this fraction of the
                                                       # others' light on every candidate is light-blind: light terms off, prior/proximity decides
 BLIND_NCH = 3
+BLIND_CONTACT = os.environ.get("V200_BLINDC", "0") not in ("", "0")   # blind clusters with a placed contact partner take its time
 COS_MIN = float(os.environ.get("V200_COS", "0"))     # >0: a candidate counts as light-supported only if the residual
                                                       # pattern on the support channels matches the cluster's own pattern (cosine)
 WARM_COLD = os.environ.get("V200_COLD", "0") not in ("", "0")   # with WARM: re-initialise the re-solved clusters by greedy self-placement
 FREE_MIN_E = float(os.environ.get("V200_FREE", "0"))   # >0: clusters below this energy are never light-decidable and only choose among existing slots
 WARM_DEC_E = float(os.environ.get("V200_WARMDEC", "0"))   # >0 with WARM: clusters in [WARMDEC, WARM) also re-solved, but only if light-decidable
 WARM_MIN_E = float(os.environ.get("V200_WARM", "0"))   # >0: start from the chain's assignment and re-solve only clusters >= this energy [MeV]
+SUBTICK_MODE = int(os.environ.get("V200_SUBTICK", "0"))   # 1: refine placed clusters between sweeps; 2: also right after every placement / accepted move (incremental)
+SUBTICK = SUBTICK_MODE > 0
+SUBTICK_MIN_E = float(os.environ.get("V200_SUBTICK_E", "20"))
+SUB_GRID = np.arange(-1.0, 1.0001, 0.1)
 GAIN_SIG = float(os.environ.get("V200_GAIN", "0"))   # >0: per-family light gains with prior sigma (rel.); 0 = fixed gains
 GAIN_LO, GAIN_HI = 0.5, 2.0
 FSYS = float(os.environ.get("V200_FSYS", "0"))     # prediction-systematics term: sigma^2 = GAIN max(A,100) + (FSYS A)^2
@@ -70,6 +75,21 @@ def P_shift(t: int) -> np.ndarray:
         _SH[t] = out
         _SH2[t] = out * out
     return _SH[t]
+
+
+_SHF: dict[int, np.ndarray] = {}
+
+
+def P_shift_f(t: float) -> np.ndarray:
+    """template shifted by a fractional number of ticks (0.05-tick grid, linear interpolation)."""
+    k = int(round(float(t) * 20.0))
+    if k not in _SHF:
+        tf = k / 20.0
+        if abs(tf - round(tf)) < 1e-9:
+            _SHF[k] = P_shift(int(round(tf)))
+        else:
+            _SHF[k] = np.interp(np.arange(NT) - tf, np.arange(NT), TMPL, left=0.0, right=0.0)
+    return _SHF[k]
 
 
 def P_shift2(t: int) -> np.ndarray:
@@ -186,6 +206,7 @@ class Event:
         # candidate time, built each sweep from the in-situ tables dtable / pnew (None = off)
         self.uprior: dict[int, dict[int, float]] = {}
         self.g: dict[tuple[int, int], float] = {}     # per (cluster, TPC) light gain (family-tied)
+        self.frac: dict[int, float] = {}                # sub-tick offset of a placed cluster (model uses t + frac)
         self.blind: set[int] = set()
         self.supp: dict[int, set[int]] = {}             # cluster -> candidate times supported by the light pattern
         self.dtable: dict[str, float] | None = None
@@ -230,16 +251,18 @@ class Event:
     def reset(self):
         self.assign = {}
         self.g = {}
+        self.frac = {}
         self.model[:] = 0.0
 
     def set_time(self, L: int, t: int | None):
         told = self.assign.get(L)
         if told == t:
             return
+        f_old = self.frac.pop(L, 0.0)
         for c in self.lab_tpcs[L]:
             a = self.amp[(L, c)]
             if told is not None:
-                self.model[c] -= self.g.get((L, c), 1.0) * a[:, None] * P_shift(told)[None, :]
+                self.model[c] -= self.g.get((L, c), 1.0) * a[:, None] * P_shift_f(told + f_old)[None, :]
             self.g.pop((L, c), None)               # a moved cluster joins a new family: gain reset
             if t is not None:
                 self.model[c] += a[:, None] * P_shift(t)[None, :]
@@ -355,7 +378,7 @@ class Event:
                 a = self.amp[(L, c)][ch]
                 told = self.assign.get(L)
                 if told is not None:
-                    M -= a[:, None] * P_shift(told)[None, :]
+                    M -= self.g.get((L, c), 1.0) * a[:, None] * P_shift_f(told + self.frac.get(L, 0.0))[None, :]
                 if t is not None:
                     M += a[:, None] * P_shift(t)[None, :]
             rail = self.rail[c][ch, None]
@@ -378,7 +401,7 @@ class Event:
             w = self.w[c][ch]
             R = self.A[c][ch] - self.model[c][ch]
             if exclude_self and L in self.assign:
-                R = R + a[:, None] * P_shift(self.assign[L])[None, :]
+                R = R + self.g.get((L, c), 1.0) * a[:, None] * P_shift_f(self.assign[L] + self.frac.get(L, 0.0))[None, :]
             q += (a ** 2)[:, None].T @ w if False else np.einsum("i,ij->j", a ** 2, w)
             r += np.einsum("i,ij->j", a, w * R)
         return q, r
@@ -431,9 +454,53 @@ class Event:
             own = self.amp[(L, c)][ch]
             others = self.model[c][ch, k]
             if L in self.assign:
-                others = others - own * P_shift(self.assign[L])[k]
+                others = others - self.g.get((L, c), 1.0) * own * P_shift_f(self.assign[L] + self.frac.get(L, 0.0))[k]
             n += int(np.sum((own >= MIN_A) & (own >= others)))
         return n
+
+    def refine_subtick(self, L: int) -> float:
+        """Move a placed cluster's light to the best sub-tick offset in [-1, 1] ticks (exact clipped
+        chi2 on its TPC channel unions, amplitude fixed).  Returns the chi2 change (<= 0)."""
+        t = self.assign.get(L)
+        if t is None:
+            return 0.0
+        f_old = self.frac.get(L, 0.0)
+        best_d, best_f = 0.0, f_old
+        # remove own light once, then test offsets
+        own = {c: self.g.get((L, c), 1.0) * self.amp[(L, c)][self.U[c]][:, None] for c in self.lab_tpcs[L] if self.U[c].size}
+        base = {c: self.model[c][self.U[c]] - own[c] * P_shift_f(t + f_old)[None, :] for c in own}
+        E0 = None
+        for f in SUB_GRID:
+            E = 0.0
+            for c in own:
+                ch = self.U[c]
+                m = np.minimum(base[c] + own[c] * P_shift_f(t + f)[None, :], self.rail[c][ch, None])
+                E += float(np.sum(self.w[c][ch] * (self.A[c][ch] - m) ** 2))
+            if abs(f - f_old) < 1e-9:
+                E0 = E
+            if E0 is not None and E - E0 < best_d - 1e-9:
+                best_d, best_f = E - E0, float(f)
+            elif E0 is None:
+                pass
+        if E0 is None:                                  # f_old not on the grid (should not happen)
+            return 0.0
+        # second pass needed when f_old came after better candidates in grid order
+        if best_f != f_old or best_d == 0.0:
+            Es = {}
+            for f in SUB_GRID:
+                E = 0.0
+                for c in own:
+                    ch = self.U[c]
+                    m = np.minimum(base[c] + own[c] * P_shift_f(t + f)[None, :], self.rail[c][ch, None])
+                    E += float(np.sum(self.w[c][ch] * (self.A[c][ch] - m) ** 2))
+                Es[float(f)] = E
+            best_f = min(Es, key=Es.get); best_d = Es[best_f] - E0
+        if best_f != f_old:
+            for c in self.lab_tpcs[L]:
+                a = self.g.get((L, c), 1.0) * self.amp[(L, c)]
+                self.model[c] += a[:, None] * (P_shift_f(t + best_f) - P_shift_f(t + f_old))[None, :]
+            self.frac[L] = best_f
+        return best_d
 
     def n_visible(self, L: int, t: int, frac: float) -> int:
         """support channels where the cluster's own peak at t is at least `frac` of the light of
@@ -449,7 +516,7 @@ class Event:
             own = self.amp[(L, c)][ch]
             others = self.model[c][ch, k]
             if L in self.assign:
-                others = others - self.g.get((L, c), 1.0) * own * P_shift(self.assign[L])[k]
+                others = others - self.g.get((L, c), 1.0) * own * P_shift_f(self.assign[L] + self.frac.get(L, 0.0))[k]
             n += int(np.sum((own >= MIN_A) & (own >= frac * np.maximum(others, 0.0))))
         return n
 
@@ -466,7 +533,7 @@ class Event:
             w = self.w[c][ch]
             R = self.A[c][ch] - self.model[c][ch]
             if L in self.assign:
-                R = R + self.g.get((L, c), 1.0) * a[:, None] * P_shift(self.assign[L])[None, :]
+                R = R + self.g.get((L, c), 1.0) * a[:, None] * P_shift_f(self.assign[L] + self.frac.get(L, 0.0))[None, :]
             num = (w * R) @ P
             den = w @ P2
             r = np.where(den > 0, num / np.maximum(den, 1e-30), 0.0)
@@ -490,7 +557,7 @@ class Event:
             M = self.model[c][ch].copy()
             for L in S:
                 if (L, c) in self.amp and L in self.assign:
-                    M -= self.g.get((L, c), 1.0) * self.amp[(L, c)][ch][:, None] * P_shift(self.assign[L])[None, :]
+                    M -= self.g.get((L, c), 1.0) * self.amp[(L, c)][ch][:, None] * P_shift_f(self.assign[L] + self.frac.get(L, 0.0))[None, :]
             Rext[c] = self.A[c][ch] - M
         Pm = {L: np.stack([P_shift(t) for t in K[L]]) for L in S}
         Pm2 = {L: Pm[L] ** 2 for L in S}
@@ -608,6 +675,10 @@ class Event:
             if best_cfg:
                 for L, t in best_cfg.items():
                     self.set_time(L, t)
+                if SUBTICK_MODE >= 2:
+                    for L in best_cfg:
+                        if self.lab_E.get(L, 0.0) >= SUBTICK_MIN_E:
+                            self.refine_subtick(L)
             return best_d
         # gains on: apply tentatively, re-profile the affected TPCs, compare exact energies, revert if worse
         tpcs = sorted({c for L in S for c in self.lab_tpcs[L]})
@@ -645,6 +716,10 @@ class Event:
             restore(snap0)
         if best_snap is not None:
             restore(best_snap)
+            if SUBTICK_MODE >= 2:
+                for L in S:
+                    if L in self.assign and self.lab_E.get(L, 0.0) >= SUBTICK_MIN_E:
+                        self.refine_subtick(L)
         return best_d
 
     # ---- coverage for light-blind clusters and noise ----------------------------------
@@ -812,6 +887,8 @@ def solve_event(ev: Event, n_sweeps: int = 3, seed: int = 0, verbose: bool = Fal
                     cand = candidate_set(ev, L, own, False, slots)
                     if cand:
                         ev.set_time(L, int(cand[int(np.argmin([curve[t] for t in cand]))]))
+                    if SUBTICK_MODE >= 2 and L in ev.assign and ev.lab_E[L] >= SUBTICK_MIN_E:
+                        ev.refine_subtick(L)                         # incremental: the next cluster sees a clean residual
                 slots = slots_of(ev, decidable)
         else:
             for L in labs:
@@ -832,7 +909,13 @@ def solve_event(ev: Event, n_sweeps: int = 3, seed: int = 0, verbose: bool = Fal
             cand = candidate_set(ev, L, own, False, slots)
             if cand:
                 ev.set_time(L, int(cand[int(np.argmin([curve[t] for t in cand]))]))
+            if SUBTICK_MODE >= 2 and L in ev.assign and ev.lab_E[L] >= SUBTICK_MIN_E:
+                ev.refine_subtick(L)                         # incremental: the next cluster sees a clean residual
         slots = slots_of(ev, decidable)
+    if SUBTICK:
+        for L in labs:
+            if L in ev.assign and ev.lab_E[L] >= SUBTICK_MIN_E:
+                ev.refine_subtick(L)
     if GAIN_SIG > 0:
         for c in range(ev.n_light):
             ev.profile_tpc(c)
@@ -915,6 +998,14 @@ def solve_event(ev: Event, n_sweeps: int = 3, seed: int = 0, verbose: bool = Fal
             d = ev.delta_exact(moves) + ev.prior_delta(moves)
             if d < -1e-9:
                 ev.set_time(L1, t2); ev.set_time(L2, t1); gain += d; n_swap += 1
+                if SUBTICK_MODE >= 2:
+                    for Lq in (L1, L2):
+                        if ev.lab_E[Lq] >= SUBTICK_MIN_E:
+                            ev.refine_subtick(Lq)
+        if SUBTICK:
+            for L in labs:
+                if L in ev.assign and ev.lab_E[L] >= SUBTICK_MIN_E:
+                    ev.refine_subtick(L)
         if GAIN_SIG > 0:
             for c in range(ev.n_light):
                 ev.profile_tpc(c)
@@ -1020,8 +1111,22 @@ def family_distances(ev: Event, L: int, fam, cap: int = 200, seed: int = 0):
 def build_uprior(ev: Event, labs, decidable: set[int], K: dict[int, list[int]], fam) -> None:
     """unary spatial prior for undecidable clusters from the in-situ tables (chi2 units)."""
     ev.uprior = {}
+    if BLIND_CONTACT and ev.blind:
+        # light-blind cluster touching a placed cluster: join the touched cluster (the biggest one if several);
+        # light keeps deciding only for blind clusters with no contact at all
+        for L in ev.blind:
+            if L not in K:
+                continue
+            partners = [(ev.lab_E.get(o, 0.0), ev.assign[o]) for (a, b) in ev.contacts
+                        for o in ((b,) if a == L else (a,) if b == L else ()) if o in ev.assign]
+            if not partners:
+                continue
+            t_host = max(partners)[1]
+            if all(abs(t - t_host) > SAME_TICKS for t in K[L]):
+                K[L].append(int(t_host))
+            ev.uprior[L] = {int(t): (0.0 if abs(t - t_host) <= SAME_TICKS else 1e6) for t in K[L]}
     for L in labs:
-        if L in decidable or L not in K:
+        if L in decidable or L not in K or L in ev.uprior:
             continue
         if ev.dtable is None and L not in ev.blind:
             continue

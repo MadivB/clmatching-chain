@@ -135,3 +135,66 @@ relative model-error term is also wrong in shape (the 17 % is a per-channel, cor
 error, not independent sample noise) and it removes the timing information at the pulse peaks.
 Poisson with sigma^2 proportional to A remains the best of the tested weightings; the true
 remedy for the model error is a per-channel scale nuisance, which the assignment cannot afford.
+
+## 8. Contact rule for light-blind clusters (2026-09-24) and the delayed-daughter target
+
+Arm BLC (full solve; a light-blind cluster that touches a placed cluster takes the touched
+cluster's time, light decides only for blind clusters with no contact): 95.03 % vs 95.53 %
+for plain light-among-slots.  With the census (99 % of disagreeing big-big contacts genuine)
+and the 2x2 rules (isolated fragment 35 % pure), contact is not a usable prior for the
+light-blind population in ND; do not re-try without a topology classifier.
+
+Delayed daughters (testing/v13x_michel_feas.py, 39 events): 675 delayed sub-pieces inside
+hosts >= 20 MeV, 14.6 GeV = 16 % of all wrong energy.  Median piece 14.7 MeV (4-31),
+compact (rms 2.7 cm, 90 % < 7.8 cm), touching the host (3.3 cm), 52 % within 0.1 of a
+host end, delay median 110 ticks (25-373: muon lifetime), own residual flash > 600 ADC in
+95 % and > 2000 in 66 %.  A geometric end-blob + own-flash rule reaches 54 % of pieces =
+5.7 GeV (about +0.25 pp if selective).  1/d^2 proxy patterns barely separate piece from
+host (cos 0.62 vs 0.59) because the daughter sits on the host's end: the discriminant must
+be the light TIME plus the geometry, tested by v14_michel_oracle.py.
+
+## 9. Light-model residual decomposition and sub-tick refinement (2026-09-24)
+
+testing/v14_engine_residual.py, 704 isolated families >= 50 MeV (channel-level isolation: other
+light < 5 % of own), 11.5k channels with predicted peak >= 2000 ADC, no saturation:
+  chi2/sample (Poisson-200): as predicted 0.48 | free sub-tick time 0.25 | free amplitude 0.33 |
+  both 0.16;  relative rms residual 18 % -> 8.9 %.
+  Per-channel amplitude factor: median 0.996, 10-90 % 0.82-1.18 (~14 % per bright channel),
+  per-family normalisation 0.87-1.11, within-family pattern spread 9 % (robust sigma of log
+  alpha); no detector-type bias (0.997 / 0.994), no channel-index structure (0.965-1.026).
+  Best sub-tick shifts 0 to +0.9 tick (median 0.4): timing is the largest single residual
+  component at the integer-tick assignment stage; the single template shape is fine.
+Sub-tick refinement inside the solver (V200_SUBTICK=1 between sweeps, 2 after every placement
+and accepted move; testing/v200): D3 95.535 -> D3S 95.534 / D3S2 95.550; C20 96.213 ->
+C20S 96.209 / C20S2 96.194.  Class by class identical.  Cleaning the big families' timing
+residual does not change where the small clusters go: their misplacement is intrinsic to the
+light information at their energy, not to the residual of the big ones.
+
+Perceiver-based delayed-daughter oracle (testing/v14_michel_oracle_gpu.py, 501 truth
+daughters, 3795 null terminal segments): light confirms 54 % of true daughters at their truth
+time (dchi2 < -100; 68 % for 20-40 MeV), the residual scan finds the truth time within 10
+ticks for 69 %, amplitude ratio median 0.9; null segments pass the same cut 6.7-8.4 % of the
+time (3-4 % with the amplitude gate).  Hosts without a daughter outnumber hosts with one 18:1,
+so a blind end-segment splitter would move more energy wrongly than it fixes; a splitter needs
+a prior that cuts the null rate by > 30x (stopping-track / end-blob / lifetime window).  The
+flash-first idea is dead: 69 % of hosts without a daughter also have a later residual flash
+> 2000 ADC on their channels (85 % with one).
+
+## 10. The low-energy limit is the prediction engine (2026-09-24, low-intensity sample, 197 events)
+
+testing/v14_engine_residual.py on /pscratch/sd/y/yuxuan/v11arms/LOWI (isolated families >= 1 MeV,
+channels with predicted peak >= 1000 ADC, other light < 5 %): per-channel amplitude factor
+alpha = actual / predicted at fixed channel amplitude 2000-5000 ADC:
+   families < 20 MeV : alpha 10-90 % = 0.58-2.02, |log alpha| median 0.36, residual floor after
+                       free amplitude + time = 0.13 (noise + shape)
+   families >= 100 MeV: alpha 10-90 % = 0.80-1.20, |log alpha| median 0.10, same floor 0.13
+Same light level, same noise floor, 3.5x larger engine error for small clusters.  Per family
+the normalisation error is 0.48-1.65 (1-5 MeV) and 0.67-1.94 (5-20 MeV) at 10-90 %, versus
+0.87-1.21 above 100 MeV; the within-family pattern error is 17 % vs 12 %.  So for clusters
+below 20 MeV the perceiver's absolute light scale is uncertain by about a factor of two even
+when the deposit is isolated, far above photon statistics (13-20 % at these amplitudes).  This,
+not the search and not the residual of the big families, is why light cannot place small
+clusters and why the support-channel construction was needed.  Lever: retrain the engine for
+the low-energy regime (relative / heteroscedastic loss so small clusters count, low-energy
+oversampling from the low-intensity single-flash population, a per-channel uncertainty head),
+then re-run the v2.0 arms below 20 MeV.

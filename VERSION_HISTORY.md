@@ -465,3 +465,268 @@ truth-validated purity), and cluster splitting with per-piece light from the per
 numbers for the record: all-TPC 95.54 -> 95.76, NS 96.70 -> 96.77, LE 60.95 -> 60.89, +5-12 s/ev.  The v1.2.2
 saturation ceiling is part of the same commit; run_v12.sh reproduces v1.2.2 behaviour (no stage 3.99).
 Tagged CLMatching_v1.2.2 and CLMatching_v1.3 on the same commit (repo + submodule); not pushed.
+
+### Study 2026-09-24: beam-comb recovery with the v1.3 precision timing (testing/v14_beam_comb.py)
+
+ND simulation truth carries the bunch structure: period 19.09 ns, flat-top bunches ~8.6 ns wide,
+batch dips every ~1.6 us; contained vertices (25 of ~150 interactions per spill in ND-LAr) have
+segment times equal to the vertex time, rock interactions enter 2-88 ns (p10-90) later.
+Reconstructed interaction start = earliest precision-family apex time per vertex (one family per
+light TPC).  63 events (V2A5), 1471 contained + 3978 external interactions:
+  * global reco time constant -5.59 ns (light path + template), stable to 0.25 ns event to event
+  * contained: reco start - vertex time 3.3 ns robust (core std 3.1 ns); 20-100 MeV 2.8 ns,
+    100-500 MeV 2.9 ns, > 500 MeV 4.0 ns
+  * comb: truth 99.0 % inside the bunch window, reco 71.8 % (random 45 %); bunch identification
+    (nearest bunch) 97.1 % correct (96.9 % energy-weighted), 96-98 % in every energy class
+  * spill bunch phase from the reconstruction alone (no truth): 1.8 ns robust per spill
+  * external interactions sit off the comb by their flight time; reco start - entry 3.3 ns, so
+    the comb turns the detector into a time-of-flight measurement for rock muons (mod 19 ns).
+
+Figure in the 2x2 style (testing/v14_beam_comb_nd_figure.py -> testing/beam_comb_figs/beam_comb_nd_v13.png,
+support figures fig1-fig6 from testing/v14_beam_comb_plots.py, arrays beam_comb_figs/beam_comb_data.npz).
+The reconstruction side is truth-free: families are linked into interactions by reconstructed time alone
+(gap 10 ns), the start is the earliest family timed to sigma < 1 ns, "not entering" = no family has hits
+within 10 cm of the upstream, x-side or top faces of the event hit box, plus E > 100 MeV and (elite) start
+sigma < 0.5 ns.  Truth supplies only the per-spill frame (the RWM analogue: the bunch phase is locked to the
+spill start, spread 0.22 ns) and one global constant.  Rayleigh power at 19.09 ns over 63 spills:
+  * all 6108 reconstructed interactions: P = 155, |R| = 0.16 -- 73 % of them are rock/external by truth,
+    which is the physics limit of an unselected ND-LAr comb (rock arrivals are spread by flight time)
+  * not entering & E > 100 MeV (717): P = 140, |R| = 0.44, truth-contained purity 0.74, in-window 0.73
+  * elite (382): P = 105, |R| = 0.53, purity 0.78, in-window 0.80, residual to the true vertex 2.07 ns robust
+  * truth contained vertices (1471): P = 885, |R| = 0.78 (99 % in-window)
+  * the apex margin to the hit box does NOT separate contained from external interactions (rock neutrons
+    and photons make deep, low-energy blips); face-touching plus energy does.
+Finding about the precision stage: the apex choice (two principal-axis ends + centroid, by fit loss) is at
+chance -- wins 32 / 31 / 38 %, apex within 20 cm of the true start point in only 27 % of > 60 cm families
+(median 41 cm away) -- while the true start sits at the LOW-z end 72-77 % of the time (median 6 cm).  The
+family time is insensitive (shift <= L/4c) but per-hit apex-clock times carry up to L/2c of this; a
+beam-direction or vertex-anchored apex prior is the next per-hit precision lever (not implemented).
+
+Projection to a common beam-time reference (user's proposal 2026-09-24: do not cut entering interactions,
+assume c and project every start point to the beam origin; testing/v14_beam_comb_projected.py ->
+testing/beam_comb_figs/beam_comb_nd_v13_projected.png).  t_beam = t_start - (r_start . n)/c with n = mean
+true neutrino direction (-0.0001, -0.102, 0.995) and r_start = the upstream-most hit of the start family
+along n (beam-direction prior; the fitted apex is unreliable).  Two measured facts first:
+  * the ND MC assigns the BUNCH TIME AT THE VERTEX for every interaction, rock vertices (z -20 m .. +6 m)
+    included: all 8272 true vertices have |R| = 0.77 unprojected, and subtracting any fraction of the
+    target flight (r.n)/c lowers it (contained 0.78 -> 0.14 at the full 1/c).  Only the products' flight
+    from the vertex is simulated (rock entry delay = distance/c to 0.1 %, vertex-to-entry line at
+    cos 0.98 to the beam).  So in the MC as delivered the projection SMEARS the comb (reco |R| 0.16 ->
+    0.03) and cannot repair rock muons, whose delay is set by an unknown rock-vertex position.
+  * emulating the physical convention (each true interaction shifted by + (r_v . n)/c, the flight the MC
+    left out, applied identically to its reconstructed time; 136 of 6108 reco interactions without a
+    truth vertex left out), the truth-free projection works with NO containment cut: all 5972 reconstructed
+    interactions P = 139 -> 644 (|R| 0.15 -> 0.33), in-window 0.65 (random 0.45); rock interactions go
+    from a +27.5 ns flight-delay smear (robust 28.7 ns) to 4.7 ns robust, 60 % in-bunch; contained 4.1 ns
+    robust (3.7 ns before projection: the start-point term adds ~1 ns).  Truth bunch times of all 8272
+    interactions: P = 4923, |R| = 0.77.  => for DATA the projection is the right operation; for this MC any
+    comb study must either stay unprojected on contained interactions or apply the emulated shift.
+
+### v1.4 ADOPTED 2026-10-01 = v1.3 + stage 4.9 light-vote force (20 cm) + stage 4.8 residual-flash filling (tag CLMatching_v1.4)
+
+5-file certification, arm V14A vs V2A5 (v1.3), 63 paired spills, in-chain (`testing/sbatch_v14_V14A.sh`,
+evaluation `testing/v14_cert_V14A.log`):
+
+| | v1.3 | **v1.4** | delta | spills better / worse |
+|---|---|---|---|---|
+| NS efficiency (TPCs <= 1.4 GeV) | 96.77 | **96.89** | +0.114 pp | 63 / 0 |
+| all-TPC accuracy | 95.76 | **95.86** | +0.097 pp | 62 / 1 |
+| LE class (noise + < 1.5 MeV clusters) | 60.89 | **65.55** | +4.66 pp | |
+
+Per file NS +0.11 to +0.12, all-TPC +0.06 to +0.12, every file up on both.  Wrong energy by class (GeV): noise 23.17 ->
+19.55, 1.5-5 MeV 32.57 -> 32.35, 5-20 MeV 20.83 -> 20.59, 20-100 MeV 32.71 -> 32.64, >= 100 MeV 52.37 -> 52.75, total
+164.38 -> 160.63.  Stage 4.8 in-chain: 130 residual flashes and 5.0 moves (18 MeV) per spill, fixed 0.70 / broken 0.17
+GeV over the 63 spills (offline emulation predicted 0.68 / 0.18), 0.30 s per spill; stage 4.9 light-vote: 554 hits per
+spill get the light factor, forced-hit accuracy 60.2 -> 66.1 %, 0.74 s per spill (+3.5 s once per worker for the SiPM
+geometry).  New stages together 1.0 s per spill, inside the 3 s budget; total 133.5 s per spill per worker median on
+this node (v1.3 measured 146.6 s on another node; the difference is node speed, the per-stage shares are unchanged).
+Committed and tagged CLMatching_v1.4 locally (not pushed).  Remaining known levers unchanged: light-prediction engine
+retraining for < 20 MeV (the deficit-filling degeneracy caps every light-based mover), delayed-daughter splitter,
+apex prior for per-hit precision, and the pending blip re-homing v2 (its noise vote is now part of 4.9; its contact /
+re-attach operators would need re-certification on top of v1.4).
+*(user: adopt vote x light beyond 20 cm as long as the new stages stay under 3 s per spill; and why does the chain not
+place small clusters at isolated flashes a light-only finder sees - try cosine matching on restricted channels, or the
+reverse construction: start from the light that needs filling and pick the nearby cluster that matches it best; a finder
+peak on the tail of a large flash is not a real t0 and must be ignored)*
+
+**Why the chain leaves isolated small flashes unfilled** (`testing/v14_isolated_flash_diag.py`, 20 spills, log
+`testing/flash_discovery/isolated_diag_V2A5.log`): 162 isolated 2-20 MeV truth flashes seen by the loose finder but
+without a chain family (8 per spill, 46 MeV per spill = 0.08 % of the energy); 89 % of that energy is in templated
+clusters (median 3.1 MeV, one cluster per flash), so the clusters exist and have a prediction.  They sit at a host
+family of median 153 MeV (a 50x brighter slot).  With the cluster's own light added back, the Poisson chi2 on its
+support channels prefers the TRUE time in only 30 % of the cases (median delta chi2 -35 at the true time vs -135 at the
+chosen one): a few per cent of a big family's 17 % model deficit outweighs the cluster's whole flash, the deficit-filling
+measured in V200_DESIGN.md.  The pattern cosine on the support channels does separate better than the chi2 but not
+cleanly: cos >= 0.9 at the true time in 44 %, cos(true) > cos(chosen) + 0.1 in 45 %.  Among ALL templated 0.5-20 MeV
+clusters (20 628, 84 GeV, 81.5 % correct) a naive "move to the best residual flash if cos >= 0.9 and better than now"
+rule fires on 13 % of the wrong ones (right in 10 %) and on 10 % of the right ones - a net loss, because right clusters
+outnumber wrong ones 4:1.
+
+**What the unexplained light contains** (`testing/v14_resid_flash_census.py`, 20 spills): residual-flash finder (10 sigma
+on actual - rendered, away from family times) gives 1556 peaks per spill with 7 % purity (truth flash in the TPC within
+5 ticks); purity rises with residual / model at the peak: 3.6 % below 0.2, 10 % at 0.2-0.5, 18 % at 0.5-1, 36 % at
+1-3, 51 % above 3 - the tail bumps of big pulses are the fakes, as the user said.  Truth energy at residual flashes
+(TPC level) 362 MeV per spill (0.6 % of the energy), 11 % of it currently correct: noise hits 24 %, templated < 20 MeV
+whole clusters 34 % (2 % correct: the mover's target, 124 MeV per spill = 0.2 pp if all were fixed), 20-100 MeV whole
+9 %, sub-pieces of clusters timed elsewhere (delayed daughters, mixed clusters) 29 %, untemplated 2 %.  So the light
+the finder sees and the chain does not fill is a 0.6 % slice, and only a third of it is movable whole clusters.
+
+**Stage 4.8 residual-flash filling** (`testing/resid_fill.py`, flag `--resid-fill`, emulator `resid_fill_offline.py`,
+grids `resid_fill_grid{1,2,3}.log`, dev/holdout `resid_fill_devhold.log`): the reverse construction.  Per light TPC:
+residual flashes = peaks of the summed residual with prominence >= 10 sigma, not within 5 ticks of a family time, kept
+only if the residual at the peak is >= 0.5 x the modelled light there (tail rejection; 0.3 -> 0.5 halves the candidates,
+same gain, half the breakage) and >= 600 ADC.  Brightest flash first: among the templated clusters 0.5-100 MeV of the
+TPC not already there, score = cosine between the predicted pattern and the residual pattern at the flash on the
+cluster's 90 % support channels; accept the best iff cos >= 0.9, cos > cos at the current slot (own light added back)
++ 0.1, residual / template amplitude in [0.5, 3], and the cluster is >= 20 cm from any co-timed host (spray stays with
+its parent); move, re-render, repeat up to 4 per flash.  Measured choices: the 8 nearest channels (user's suggestion)
+are too few to discriminate (55 % of moves wrong without gates, 32 % with); the 90 % support or the 30 nearest channels
+give 16 % wrong; the blip-rehome glare gate (own / others >= 0.17) is NOT used here - it blocks exactly the regime-A
+clusters parked at brighter slots (moves 27 -> 6 per spill) and the host-distance gate alone protects the spray;
+extending candidates to 100 MeV adds the 20-100 MeV whole clusters at residual flashes.  Offline, force coverage
+replayed with the v1.4 light-vote rule in both arms:
+
+| | files 1-3 (39 spills, tuning) | files 4-5 (24 spills, holdout) |
+|---|---|---|
+| all-TPC | 96.286 -> 96.312 (+0.026 pp) | 95.124 -> 95.144 (+0.021 pp) |
+| fixed / broken | 0.47 / 0.13 GeV | 0.21 / 0.05 GeV |
+| spills better / worse | 30 / 9 | 16 / 7 |
+| moves per spill | 4.6 (19 MeV) | 5.1 (17 MeV) |
+| stage time | 0.36 s | 0.40 s |
+
+Every file positive (+0.007 to +0.034 pp).  Moved clusters were wrong 88 % of the time; outcome right 55 %, neutral
+(wrong before and after: moved to a residual flash that was not theirs) 33 %, wrong 12 %.  The residual stays
+limited by the deficit-filling degeneracy, not by the search: the remaining 84 % of the wrong small-cluster energy sits
+at times where the light is already explained by another family (no residual peak to fill).
+v1.4 = v1.3 + `--force-light-cm 20` (stage 4.9, 0.84 s/spill, +0.095 pp offline) + `--resid-fill` (stage 4.8, 0.4 s,
++0.024 pp offline); `run_v14.sh`; certification arm V14A (`testing/sbatch_v14_V14A.sh`, reference V2A5) running.
+
+### Flash discovery: chain t0s vs light-only flash finders (2026-10-01, measurement on the v1.3 certification dumps)
+*(user: does the residual-based chain find more t0s than flash finding, in particular low-energy light buried under
+bigger flashes, and how often are the new t0s right?)*  `testing/v13_flash_discovery.py` + `_plot.py`, log and figure in
+`testing/flash_discovery/` (`flash_discovery_V2A5.log`, `flash_discovery_v13.png`).
+
+Setup per light TPC and spill (4409 TPC-events): truth flashes = truth interaction-time groups with >= 0.5 MeV in the TPC
+(8.6 per TPC-event); flash finders on the actual light alone: S(k) = summed waveform of the non-vetoed channels, peak
+prominence k x pre-trigger sigma (S10 ~ 4 PE summed ... S60 ~ 27 PE), and C(2PE, n) = per-channel 2-PE hits coincident on
+>= n channels; chain t0s = family times of the final assignment (8.0 per TPC-event).  Match tolerance 5 ticks; accidental
+matches measured with truth shifted by 300 ticks and removed.  Fakes are judged at module level (the two drift volumes
+of a module share the light).  The chain has 0.50 fake t0s per TPC-event (purity 0.94 TPC / 0.95 module); the finder
+with the same fake rate is S40 (0.41) or C2PE/6 (0.31); S10 has 9.6 fakes per TPC-event.
+Discovery efficiency (accidental-corrected) vs energy deposited in the TPC at the flash:
+
+| E in TPC | S10 (loose) | S40 (matched fakes) | C2PE/6 | chain |
+|---|---|---|---|---|
+| 0.5-2 MeV | 0.66 | 0.20 | 0.05 | 0.23 |
+| 2-5 MeV | 0.82 | 0.58 | 0.32 | 0.64 |
+| 5-20 MeV | 0.91 | 0.85 | 0.79 | 0.85 |
+| 20-100 MeV | 0.96 | 0.95 | 0.97 | 0.97 |
+| 100-500 MeV | 0.98 | 0.98 | 0.99 | 0.99 |
+
+Buried flashes (gap to the nearest >= 3x brighter truth flash in the module), 2-20 MeV: within 5 ticks S40 0.80 / S10
+0.89 / chain 0.87; 5-20 ticks S40 0.51 / S10 0.66 / chain 0.69; 20-60 ticks S40 0.79 / S10 0.95 / chain 0.75; isolated
+S40 0.81 / S10 0.97 / chain 0.77.  20-100 MeV: within 5 ticks S40 0.89 / chain 0.98; 5-20 ticks S40 0.82 / S10 0.84 /
+chain 0.94; isolated 0.98 / 0.98 / 0.98.
+=> The residual-based chain does resolve light buried within ~20 ticks (320 ns) of a brighter flash better than any
+light-only finder, at any threshold, and for 20-100 MeV deposits it is close to complete (94-98 %) where finders stop at
+82-89 % at the same fake rate.  For ISOLATED 2-20 MeV flashes the picture inverts: a loose finder sees 97 % of them (the
+light is there) but the chain gives only 77 % a t0 - the small cluster was assigned to another flash (the known
+small-cluster assignment error), not a light-visibility limit.  Below 2 MeV neither works (chain 0.23).
+New t0s (chain t0 with no finder peak within 5 ticks), vs S40: 1.0 per TPC-event, 63 % real in the TPC (70 % in the
+module), carrying 37 GeV in 63 spills (1 % of the energy) of which 77 % is correctly placed; by placed energy >= 100 MeV
+94 % real (93 % of the energy correct), 20-100 MeV 72 %, < 20 MeV 60-64 % (energy 50-68 % correct).  Vs the loose S10:
+0.52 new per TPC-event, 50 % real, 25 GeV, 78 % correct.  The reverse set (finder peaks with no chain t0) carries 11 GeV
+of truth energy vs S40 and 20 GeV vs S10 (0.3-0.5 % of all energy): flashes the light shows but the chain merged into a
+neighbour (isolated small clusters, Michel daughters).  Implication: a light-only flash finder could SEED candidate
+times for small clusters (the isolated 2-20 MeV gap, 0.97 vs 0.77), but the decision problem (deficit filling at
+brighter slots) remains the limit measured in V200_DESIGN.md.
+
+### Stage 4.9 light-vote force rule (2026-09-30, TESTED offline on the v1.3 certification dumps; adoption = user's call)
+*(user: beyond ~10-20 cm spatial information is useless for an isolated hit; decide it from the residual light on the
+nearest channels; keep it ultra fast)*
+
+Anatomy first (`testing/v13_noise_anatomy.py`): the unclustered class (54.9 GeV in 63 spills, 1.4 % of the energy,
+58.6 % correct) is exclusively single hits (58 %) and pairs (42 %) that never met the leftover DBSCAN's 3 hits within
+4 cm; 97 % of the energy is >= 4 cm from any cluster, 45 % is 10-25 cm away, 13 % is > 25 cm away.  Correctness tracks
+the probability that the nearest clustered hit belongs to the same interaction (78 / 55 / 32 % at 4-10 / 10-25 / > 25
+cm); only 4-11 % of the energy has an undiscovered truth flash; the oracle "best family time in the TPC" would be
+81-87 % correct on the far hits.  Clusters with a light prediction are never left to geometry (~0.4 GeV).
+
+Rule (`testing/force_light_vote.py`, harness `--force-light-cm D`): noise hits within 3 cm of an assigned hit keep
+its time; beyond that every assigned cluster within 60 cm votes for the family time within +-6 ticks of its own with
+w = exp(-(d_c - d1)/14 cm) (x 0.5 for clusters >= 20 MeV) [the force_noise_vote kernel, one vectorised pass, voxel
+representatives 3 cm beyond 15 cm]; for hits farther than D from any assigned hit each candidate's vote is multiplied
+by (1 + res/median res), res = positive light residual (actual - everything rendered) at the candidate time, averaged
+over +-2 ticks around the template peak on the 6 nearest non-vetoed channels with 1/d^2 weights = the un-rendered
+light of the parent's own low-energy deposits near the hit.  Light scans tried and rejected: actual light (worse than
+nearest hit: picks the brightest flash), residual/actual, residual over all 120 channels (systematics-dominated; the
+best channel count is 3-6), grouping neighbouring far hits before deciding (no gain), largest-family and long-range
+energy priors (much worse).  Exact emulation on the 63 certification spills (force is the last assignment stage):
+
+| rule for noise hits | 3-10 cm | 10-15 cm | 15-20 cm | > 20 cm | noise class | all-TPC |
+|---|---|---|---|---|---|---|
+| nearest assigned hit (v1.3) | 72.7 % | 59.7 % | 51.0 % | 35.8 % | 58.6 % | - |
+| cluster-density vote beyond 3 cm | 77.5 % | 66.8 % | 59.1 % | 42.8 % | 64.7 % | +0.088 pp |
+| vote x light beyond 20 cm | 77.5 % | 66.8 % | 59.1 % | 44.8 % | 65.2 % | +0.095 pp |
+| vote x light beyond 10 cm | 77.5 % | 67.0 % | 59.8 % | 44.7 % | 65.3 % | +0.096 pp |
+| vote x light beyond 3 cm | 76.7 % | 67.0 % | 59.8 % | 44.8 % | 65.0 % | +0.092 pp |
+
+Energy per distance bin 1.1 / 21.8 / 11.5 / 8.0 / 12.5 GeV.  The light term helps only where geometry is weak (+2 pp
+beyond 20 cm, +0.7 pp at 15-20 cm, nothing below 10 cm, slightly negative at 3-10 cm), so D = 10 cm is the setting.
+Most of the gain is the vote itself (already part of the pending blip re-homing v2 as --noise-vote); the light factor
+adds +0.008 pp all-TPC (+0.6 pp on the noise class) on both the v1.3 dumps and the BLIP5B dumps (+0.078 -> +0.088 pp
+there).  Cost 0.84 s per spill in total, of which 0.25 s is the isolation pass the current stage already pays and
+~0.04 s is the light part.  The remaining 20-pp gap to the oracle is not in the local geometry nor in the local
+light: isolated 0.3 MeV deposits carry no information about which of the TPC's interactions emitted them.
+In-chain smoke (`testing/sbatch_fl10_smoke.sh`, file 1 events 0 and 8, arm FL10smoke): forced-hit accuracy 56.9 -> 64.3 %
+and 55.2 -> 63.8 %, LE 57.9 -> 64.0 % and 57.1 -> 63.5 %, all-TPC +0.12 / +0.11 pp vs the v1.3 rows; stage 0.4-1.1 s
+(+3.5 s once per worker for the SiPM geometry load).  Matches the offline emulation.
+
+### Stage 4.7 blip re-homing (2026-09-24, TESTED, adoption = user's call)  *(user: "we really need to get these low energy blips to the right place")*
+
+`testing/blip_rehome.py`, flag `--blip-rehome` (off by default; `--blip-no-contact`, `--blip-no-iso`,
+`--blip-contact-cm`), runs after 4.5 swap-fix and before 4.9 force; touches only 0.5-20 MeV clusters.
+Census that motivated it (v1.3 cert dumps, 63 ev): sub-20 MeV + noise = 79 of 164 GeV wrong; a TPC holding
+only small clusters is 0.9 % of TPC-events; templated 0.5-20 MeV wrong splits into clusters whose true time
+has no >= 20 MeV deposit in their TPC (20.5 GeV, own light ~0.3 of the light at the true time, wrong ones sit
+at 3x / 8x brighter slots) and clusters co-timed with a big object (31.6 GeV, own light ~0.03 = glare).
+Every light-driven small-cluster mover tried offline (quiet-hole fill, local-channel cosine of single clusters
+or 30-cm groups, peak-centric exclusive filling, cross-TPC parent times) fixes the isolated class well but
+breaks correctly placed co-timed spray more (~9x more correct energy sits at bright slots).  The separating
+features among proposals are the distance to the current host family (AUC 0.82) and the own light relative to
+the host's 17 % systematic band (AUC 0.80), used as gates below (chosen on files 1-3, confirmed on 4-5).
+Operators: (1) contact certificate - a small cluster touching (<= 2 cm) placed >= 20 MeV clusters that all share
+one time (spread <= 3 ticks) takes it (the joint's connectivity certificate, now also in shower TPCs where the
+4.1 matrix has no spatial prior); (2) isolated re-homing - candidates = times of placed >= 20 MeV clusters in
+OTHER TPCs within 150 cm at which the own TPC holds no big family; local-channel cosine of the summed template of
+small clusters within 30 cm vs the positive residual >= 0.9 and > current + 0.1, amplitude ratio in [0.5, 2],
+host distance >= 20 cm, own light >= 0.1 x 0.17 x others' predicted light; static decisions, then commit.
+5-file certification (arm BLIP5 vs V2A5, 63 paired events, in-chain): all-TPC 95.76 -> 95.83 (+0.066 pp, 55/8
+events better/worse), NS 96.77 -> 96.81 (+0.036, 51/12), all five files up on both (+0.06..+0.07 / +0.03..+0.04),
+LE 60.89 -> 60.98; wrong energy 1.5-5 MeV 32.57 -> 31.83 GeV, 5-20 MeV 20.83 -> 19.02, noise and >= 20 MeV
+unchanged (total 164.38 -> 161.85 GeV); stage audit contact fixed/broke 2.36/0.49 GeV, isolated 1.46/0.71 GeV;
+1.75 s/ev.  Offline emulation (testing/blip_rehome_offline.py, force replayed on the V2A5 dumps) predicted
++0.066 / +0.036 exactly.  Outputs /pscratch/sd/y/yuxuan/v11arms/BLIP5; runner testing/sbatch_blip_BLIP5.sh.
+Not addressed: noise hits (23 GeV wrong, force at ~60 %) and most of the isolated class (what separates
+'pulled away' from 'belongs here' beyond host distance and glare is still open).
+
+#### Stage 4.7 v2 (2026-09-25, TESTED, adoption = user's call): + operator 3 re-attach + 4.9 noise-hit vote
+
+Four levers explored in parallel on top of stage 4.7 (offline emulator, thresholds on files 1-3, holdout 4-5):
+noise-hit vote +0.095/+0.095 pp, re-attach +0.093/+0.082, near-contact +0.054/+0.047 (redundant with re-attach:
++0.003 on top, not used), isolated-operator upgrade +0.006/+0.006 (not used).
+- Operator 3 re-attach (`--blip-reattach`, blip_rehome.py `_reattach_moves`, decided after (1)/(2) are committed):
+  a templated 0.5-20 MeV cluster whose current slot has no co-timed placed >= 20 MeV cluster within 20 cm in its TPC
+  (10 cm in any TPC) takes the time of the placed big cluster of its own TPC (other time, within 40 cm, not in 2-cm
+  contact) minimising own(t) x d, own(t) = own light / (0.17 x base light on its support channels at t),
+  iff <= 1.25 cm (spray is invisible under its parent's glare; the further away, the more invisible it must be).
+- 4.9 noise-hit vote (`--noise-vote`, force_noise_vote.py, with --force-simple): a noise hit within 3 cm of an
+  assigned hit keeps the nearest-hit time; otherwise every assigned cluster within 100 cm votes for its time with
+  weight exp(-(d_c - d1)/14 cm) x (0.5 if >= 20 MeV), votes summed in +-6-tick windows, heaviest cluster of the
+  winning window gives the time (nearest hit belongs to the hit's own interaction only 56-76 % of the time beyond 5 cm).
+5-file certification in-chain (arm BLIP5B = v1.3 + --blip-rehome --blip-reattach --noise-vote, vs V2A5, 63 events):
+all-TPC 95.76 -> 96.00 (+0.238 pp, 63/0 events), NS 96.77 -> 96.98 (+0.210, 63/0), LE 60.89 -> 66.05, every file
++0.22..+0.25 all-TPC / +0.19..+0.24 NS; wrong energy noise 23.17 -> 19.64 GeV, 1.5-5 MeV 32.57 -> 29.63, 5-20 MeV
+20.83 -> 18.04, >= 20 MeV unchanged (total 164.38 -> 155.09); stage audit contact 2.36/0.49, iso 1.46/0.71,
+re-attach 5.67/2.48 GeV fixed/broke; median 142 -> 145 s/ev (stage 2.45 s/ev + vote).  Offline predicted +0.241/+0.209.
+Outputs /pscratch/sd/y/yuxuan/v11arms/BLIP5B; runner testing/sbatch_blip_BLIP5B.sh (batch wrapper batch_blip_BLIP5B.sbatch).

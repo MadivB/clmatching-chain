@@ -85,6 +85,7 @@ STAGE_CHECKPOINTS = [
     ("after_redecide", "3.98_redecide"),
     ("after_v200", "3.99_v200_blocks"),
     ("after_swap_fix", "4.5_swap_fix"),
+    ("after_blip", "4.7_blip_rehome"),
     ("after_force", "4.9_force_coverage"),
     ("after_precision", "7_precision"),
 ]
@@ -730,6 +731,37 @@ def main() -> int:
                          "clusters to the flash their saturation-masked spatial light best "
                          "fits (Hungarian-style pairwise local search)")
     ap.add_argument("--swap-min-energy", type=float, default=25.0)
+    ap.add_argument("--blip-rehome", action="store_true",
+                    help="stage 4.7 (blip_rehome.py): 0.5-20 MeV clusters, after swap-fix and before "
+                         "force: (1) contact certificate - touching placed >=20 MeV clusters that share "
+                         "one time -> that time; (2) isolated re-homing - quiet-in-own-TPC times of "
+                         "nearby big clusters in other TPCs, local-channel group cosine, host-distance "
+                         "and glare gates")
+    ap.add_argument("--blip-no-contact", action="store_true")
+    ap.add_argument("--blip-no-iso", action="store_true")
+    ap.add_argument("--blip-contact-cm", type=float, default=2.0)
+    ap.add_argument("--blip-near", action="store_true",
+                    help="stage 4.7 operator 1b: near-contact (nearest placed big cluster within 15 cm, no "
+                         "co-timed big within 20 cm, light does not prefer the current slot, buried in glare)")
+    ap.add_argument("--blip-reattach", action="store_true",
+                    help="stage 4.7 operator 3: re-attach strays with no co-timed host to the nearby big "
+                         "cluster minimising own-light/glare x distance (<= 1.25 cm)")
+    ap.add_argument("--resid-fill", action="store_true",
+                    help="stage 4.8 (testing/resid_fill.py): fill unexplained residual flashes with the templated small "
+                         "cluster of the TPC whose predicted pattern matches the residual best (reverse construction, "
+                         "user 2026-10-01); runs after 4.7 and before 4.9")
+    ap.add_argument("--rf-small-max", type=float, default=100.0); ap.add_argument("--rf-cos-min", type=float, default=0.9)
+    ap.add_argument("--rf-dcos", type=float, default=0.1); ap.add_argument("--rf-ratio-hi", type=float, default=3.0)
+    ap.add_argument("--rf-tail", type=float, default=0.5); ap.add_argument("--rf-host-min", type=float, default=20.0)
+    ap.add_argument("--rf-mode", default="sup"); ap.add_argument("--rf-kprom", type=float, default=10.0)
+    ap.add_argument("--force-light-cm", type=float, default=None,
+                    help="stage 4.9 variant (force_light_vote.py): cluster-density vote for noise hits beyond 3 cm, "
+                         "multiplied by the positive light residual on the 6 nearest channels for hits farther than "
+                         "this distance [cm] from any assigned hit (user 2026-09-30); overrides --noise-vote")
+    ap.add_argument("--noise-vote", action="store_true",
+                    help="4.9 force (with --force-simple): noise hits beyond 3 cm of any assigned hit take "
+                         "the time of a distance-weighted vote of nearby assigned clusters "
+                         "(force_noise_vote.py) instead of the nearest assigned hit")
     ap.add_argument("--swap-min-gain", type=float, default=0.02)
     ap.add_argument("--reassign", action="store_true",
                     help="after phase3, residual-driven per-TPC MOVE: fill a light-deficit flash "
@@ -2415,6 +2447,82 @@ def main() -> int:
                     # store under 'swap' key so score_swap.py works unchanged
                     p3_row["swap"] = {k: v for k, v in st_ra.items() if k != "audit"}
                     p3_row["swap_audit"] = st_ra["audit"]
+                if args.blip_rehome:
+                    # ---------- STAGE 4.7: blip re-homing (contact certificate + isolated re-homing) ----------
+                    if _HERE not in sys.path:
+                        sys.path.insert(0, _HERE)
+                    from blip_rehome import run_blip_rehome
+                    _bimg = ns1["imageMaps"]
+                    _bbase = ns1["baseImage"]
+                    _bamp = {(int(L), int(c)): np.asarray(im, np.float64).max(axis=1)
+                             for (L, c), im in _bimg.items() if 0 <= int(c) < n_light}
+
+                    def _brender(L, c, t_old, t_new):
+                        im = np.asarray(_bimg[(L, c)], np.float64)
+                        if t_old is not None:
+                            _bbase[c] -= timeinterpolation(im, shift=float(t_old), baseline=0).astype(_bbase.dtype)
+                        if t_new is not None:
+                            _bbase[c] += timeinterpolation(im, shift=float(t_new), baseline=0).astype(_bbase.dtype)
+                    _bts = np.asarray(ns1["hit_timestamps"], dtype=np.float64).copy()
+                    st_bl = run_blip_rehome(
+                        ts=_bts, labels=np.asarray(ns1["labels_global"]), energy=np.asarray(ns1["Eset"], np.float64),
+                        xyz=np.stack([np.asarray(ns1["xset"], np.float64), np.asarray(ns1["yset"], np.float64),
+                                      np.asarray(ns1["zset"], np.float64)], axis=1),
+                        tpc=np.asarray(ns1["hitTPCid"]).astype(np.int64), amp=_bamp,
+                        actual=np.asarray(ns1["fullLightWaveform"], np.float64), base=_bbase, render=_brender,
+                        contact=not args.blip_no_contact, isolated=not args.blip_no_iso,
+                        contact_cm=float(args.blip_contact_cm), truth_t0=truth_t0,
+                        near=bool(args.blip_near), reattach=bool(args.blip_reattach))
+                    ns1["hit_timestamps"] = _bts.astype(np.asarray(ns1["hit_timestamps"]).dtype)
+                    p3_row["blip_audit"] = st_bl.pop("audit", [])
+                    p3_row["blip"] = st_bl
+                    print(f"  [4.7 blip] contact moved {st_bl['contact_moved']} ({st_bl['e_contact']:.0f} MeV, "
+                          f"fixed/broke {st_bl.get('contact_fixed_e', 0):.0f}/{st_bl.get('contact_broke_e', 0):.0f} MeV), "
+                          f"iso moved {st_bl['iso_moved']} ({st_bl['e_iso']:.0f} MeV, fixed/broke "
+                          f"{st_bl.get('iso_fixed_e', 0):.0f}/{st_bl.get('iso_broke_e', 0):.0f} MeV), "
+                          f"near {st_bl['near_moved']} ({st_bl.get('near_fixed_e', 0):.0f}/{st_bl.get('near_broke_e', 0):.0f}), "
+                          f"reattach {st_bl['reattach_moved']} ({st_bl.get('reattach_fixed_e', 0):.0f}/"
+                          f"{st_bl.get('reattach_broke_e', 0):.0f}), "
+                          f"{st_bl['time_s']:.1f}s", flush=True)
+                    tim["after_blip"] = time.time() - t_ev
+                    _evo("4.7_blip_rehome", ns1["hit_timestamps"])
+                # ---------- STAGE 4.8: residual-flash filling ----------
+                if args.resid_fill:
+                    if _HERE not in sys.path:
+                        sys.path.insert(0, _HERE)
+                    from resid_fill import run_resid_fill
+                    from subtick_refine import build_sipm_positions
+                    _rimg = ns1["imageMaps"]; _rbase = ns1["baseImage"]
+                    _ramp = {(int(L), int(c)): np.asarray(im, np.float64).max(axis=1)
+                             for (L, c), im in _rimg.items() if 0 <= int(c) < n_light}
+
+                    def _rrender(L, c, t_old, t_new):
+                        im = np.asarray(_rimg[(L, c)], np.float64)
+                        if t_old is not None:
+                            _rbase[c] -= timeinterpolation(im, shift=float(t_old), baseline=0).astype(_rbase.dtype)
+                        if t_new is not None:
+                            _rbase[c] += timeinterpolation(im, shift=float(t_new), baseline=0).astype(_rbase.dtype)
+                    _rts = np.asarray(ns1["hit_timestamps"], dtype=np.float64).copy()
+                    st_rf = run_resid_fill(
+                        ts=_rts, labels=np.asarray(ns1["labels_global"]), energy=np.asarray(ns1["Eset"], np.float64),
+                        xyz=np.stack([np.asarray(ns1["xset"], np.float64), np.asarray(ns1["yset"], np.float64),
+                                      np.asarray(ns1["zset"], np.float64)], axis=1),
+                        tpc=np.asarray(ns1["hitTPCid"]).astype(np.int64), amp=_ramp,
+                        actual=np.asarray(ns1["fullLightWaveform"]), base=_rbase, veto=veto_mask,
+                        chan_pos=build_sipm_positions(file_path), render_cb=_rrender,
+                        pulse_path=os.path.join(BASE_DIR, "assets", "avg_pulse.npy"),
+                        small_min=0.5, small_max=float(args.rf_small_max), mode=str(args.rf_mode), K=8,
+                        cos_min=float(args.rf_cos_min), dcos_min=float(args.rf_dcos), ratio_lo=0.5,
+                        ratio_hi=float(args.rf_ratio_hi), k_prom=float(args.rf_kprom), fam_tol=5.0,
+                        tail_ratio=float(args.rf_tail), min_adc=600.0, max_per_flash=4, glare_min=None,
+                        host_min_cm=float(args.rf_host_min), truth_t0=truth_t0)
+                    ns1["hit_timestamps"] = _rts.astype(np.asarray(ns1["hit_timestamps"]).dtype)
+                    st_rf.pop("audit", None); p3_row["resid_fill"] = st_rf
+                    print(f"  [4.8 resid-fill] residual flashes {st_rf['n_flash']}, moved {st_rf['n_moved']} clusters "
+                          f"({st_rf['e_moved']:.0f} MeV), fixed/broke {st_rf['fixed_e']:.0f}/{st_rf['broke_e']:.0f} MeV, "
+                          f"{st_rf['time_s']:.2f}s", flush=True)
+                    tim["after_resid_fill"] = time.time() - t_ev
+                    _evo("4.8_resid_fill", ns1["hit_timestamps"])
                 # ---------- STAGE 4.9: force coverage ----------
                 if args.force_coverage:
                     if _HERE not in sys.path:
@@ -2423,7 +2531,20 @@ def main() -> int:
                     from force_simple import force_simple_coverage
                     ts_pf = np.asarray(ns1["hit_timestamps"], dtype=np.float64)
                     A_pref = np.isfinite(ts_pf) & (ts_pf >= 0)
-                    if args.force_simple:
+                    if args.force_simple and args.force_light_cm is not None:
+                        from force_light_vote import force_light_vote_coverage
+                        from subtick_refine import build_sipm_positions
+                        st_f = force_light_vote_coverage(
+                            ns1, sipm=build_sipm_positions(file_path), isolate_cm=float(args.isolate_cm),
+                            energy=np.asarray(ns1["Eset"], np.float64), light_cm=float(args.force_light_cm),
+                            actual=np.asarray(ns1["fullLightWaveform"]), base=np.asarray(ns1["baseImage"]),
+                            veto=veto_mask)
+                    elif args.force_simple and args.noise_vote:
+                        from force_noise_vote import force_noise_vote_coverage
+                        st_f = force_noise_vote_coverage(
+                            ns1, isolate_cm=float(args.isolate_cm),
+                            energy=np.asarray(ns1["Eset"], np.float64))
+                    elif args.force_simple:
                         st_f = force_simple_coverage(
                             ns1, isolate_cm=float(args.isolate_cm))
                     else:
