@@ -265,6 +265,12 @@ Event displays of types 1-5: `testing/v12_displays/` (light-vs-prediction, reco 
   The revised stage (local dE/dx, lifted predictor floor, host-remainder rule, looser light gates on Bragg-attached
   pieces only; certified as arm V14M2 on 2026-10-02) gives 37.0 % of the Michel energy correctly timed, delayed Michels
   17-19 % in the 30-300 tick range, at 7 s per spill instead of 10, with the same ledger (NS +0.033 pp over v1.4).
+  **The uncovered Michels are not faint.** Their own light on the brightest channel is median 1,700 ADC (p10 500,
+  p90 8,000), half of what is on that channel at that time on average, and 131 of the 336 (2.2 GeV per 63 spills) sit
+  at a time where no placed family exists at all: an isolated unexplained flash. The exclusion is geometric (no Bragg
+  ball at a stopping muon's end under the 5 MeV dense-point definition, host shorter than 20 cm). Example waveforms:
+  `testing/michel_nd_out/waveforms/`. A candidate generator keyed to unexplained flashes near track ends, instead of
+  skeleton rules, is the lever.
 - **Low-energy physics (isolated 1-20 MeV deposits) is the weak point**: interaction-level recovery 32-42 %, hit accuracy
   66-87 %. The measured cause is the light-prediction engine at low energy. A physics goal that rests on isolated
   low-energy blips should plan for the engine retraining first.

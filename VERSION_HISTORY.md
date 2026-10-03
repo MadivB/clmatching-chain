@@ -790,6 +790,30 @@ Direct Michel metric (`michel_nd_out/michel_metric_v14m2.log`, 916 Michels, 19.7
 v1.4 33.3 % / V14M 36.5 % / V14M2 37.0 %; delayed 30-100 ticks 12.8 / 16.0 / 17.6 %, 100-300 ticks 11.1 / 18.6 / 18.8 %;
 pion-hosted 17.6 / 20.6 / 21.5 %, muon-hosted 54.7 / 58.4 / 58.4 %; no family within 5 ticks of the Michel flash
 3.7 / 8.0 / 8.6 %; Michels >= 50 % right 19 / 23 / 23 %.
+
+**How faint are the delayed Michels the stage never sees?  (2026-10-02, user's question; `testing/v15_michel_waveforms.py`
+(GPU: perceiver light of every delayed Michel from its own hits, actual / chain-model amplitude at the Michel time, example
+figures), `v15_michel_photons.py` (truth photons), `v15_michel_light_summary.py`; outputs `michel_nd_out/waveforms/`):**
+NOT faint.  For the 336 delayed Michels (6.2 GeV) that never become a candidate piece, the Michel's own light on its
+brightest channel is median 1,690 ADC (p10 520, p90 8,200; summed over the TPC median 20,600 ADC on ~33 support channels);
+72 % exceed 1,000 ADC, 92 % are at least 10 % of what is actually on that channel at that time, 54 % at least 50 %,
+14 % brighter than everything else there.  The covered Michels are only slightly brighter (median 2,220 ADC).  131 of the
+336 (2.2 GeV) have NO placed family within 15 ticks: an isolated, unexplained flash of ~1,500 ADC that no cluster claims.
+The perceiver prediction is calibrated: on the isolated Michels the actual-minus-model residual on the best channel is
+1.12x (uncovered) / 1.00x (covered) the prediction.  By exclusion reason (median Michel light / median actual there):
+no Bragg ball within 16 cm 141 Michels 2.6 GeV (2,320 / 3,970 ADC), host extent < 20 cm 111, 1.75 GeV (2,470 / 3,980),
+Bragg not at a host end 55 (960 / 4,380), tip not free 40 (1,750 / 5,160), no tip in Michel 39 (1,380 / 5,240), outer-face
+margin 44 (1,200 / 3,840), host < 10 MeV 46 (1,750 / 2,840).  Example figures (charge view with the Michel hits in red,
+full-TPC summed waveform with host / Michel times, zooms on the Michel's six brightest channels with actual, chain model
+and model + Michel): `michel_nd_out/waveforms/michel_<spill>_m<id>.png`; population figure `michel_light_population.png`.
+Truth photons: produced (segments.n_photons, complete) median 740,000 per delayed Michel (24,340 per MeV of dE; the
+Michel deposits 17-47 MeV, charge sees 10-29 MeV).  The flow files' detected-photon truth (`mc_truth/light_module<N>`)
+is unusable in this production: the (4, 64) block is four identical copies, only the odd charge TPC of each module
+carries photons, and every segment, Michel or host, shows 1-3 detected photons per MeV (1e-4 of production), inconsistent
+with the measured 1-20 ADC per photon of the same tables' brighter flashes; not used.  CONCLUSION: the delayed-Michel
+ceiling is the geometric candidate generator (Bragg-ball requirement and host-extent gate above all: stopping muons have
+no detectable Bragg ball at the 5 MeV / 1.5 cm dense-point definition, short pions fail the 20 cm extent), not the
+light.  The light of a typical uncovered Michel is 0.5x the pile-up on its best channel and 1-10x on isolated ones.
   Speed levers left:
 the perceiver's ~11 ms per piece is per-group overhead (grouping / voxelisation), not GPU compute - a piece-level
 voxeliser that reuses the host cluster's voxel grid, or an amplitude-native (no image) prediction path, would take the
