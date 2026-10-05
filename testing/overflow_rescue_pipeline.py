@@ -1008,10 +1008,12 @@ def main() -> int:
                 t_evo[stage] = {int(l): round(float(np.median(ts_a[(labels_global == l) & okm])), 2)
                                 for l in np.unique(labels_global[okm])}
 
+            _t_truth = time.time()
             truth = tp.extract_event_hit_energy_and_truth_t0(
                 h5, h5["charge/events/ref/charge/calib_prompt_hits/ref"], eventid=int(ev_id),
                 hits_full=h5["charge/calib_prompt_hits/data"], convert_to_matching_ticks=True)
             truth_t0 = np.asarray(truth["truth_t0"], dtype=np.float64)
+            tim["truth_s"] = time.time() - _t_truth          # MC-only cost (scoring), absent in production
 
             def _label_truth(lab):
                 m = labels_global == lab
@@ -1102,16 +1104,25 @@ def main() -> int:
             v02_moved = {}
             merged_set, merged_placed, merge_stats = set(), {}, None
             pool_stats, rescue_audit = None, []
-            _ti_cpu = {}          # speed 2026-10-05: fast-scan image maps live on the GPU; one CPU copy per image instead of a .cpu() per shift call
+            import weakref as _weakref
+            _ti_cpu = {}          # speed 2026-10-05: fast-scan image maps live on the GPU; one CPU copy per image instead of a .cpu() per shift
+                                  # call.  id -> (weakref, copy): no strong reference, because the helper closure outlives the event in some
+                                  # callers and a strong reference pinned every event's image maps on the GPU (30 GB after a few spills)
 
             def _ti_host(arr):
                 if isinstance(arr, np.ndarray):
                     return arr
-                a = _ti_cpu.get(id(arr))
-                if a is None:
-                    a = (arr.detach().cpu().numpy() if hasattr(arr, "detach") else np.asarray(arr), arr)   # keep arr alive so id() stays unique
-                    _ti_cpu[id(arr)] = a
-                return a[0]
+                k = id(arr); hit = _ti_cpu.get(k)
+                if hit is not None and hit[0]() is arr:
+                    return hit[1]
+                a = arr.detach().cpu().numpy() if hasattr(arr, "detach") else np.asarray(arr)
+                try:
+                    if len(_ti_cpu) > 20000:
+                        _ti_cpu.clear()
+                    _ti_cpu[k] = (_weakref.ref(arr), a)
+                except TypeError:
+                    pass
+                return a
             if args.backbone != "prod":
                 def ti_f(arr, t):
                     return timeinterpolation(_ti_host(arr), shift=float(t), baseline=0).astype(np.float64)

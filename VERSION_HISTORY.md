@@ -1118,4 +1118,19 @@ track stage 9 s, imports ~2 s per spill at 8 spills per worker.
 147.7 -> 131.5 s, p90 205 -> 173, stage sum 151 -> 131 (65.5 s per spill per GPU); matrix 22.0 -> 8.0 s (the rest of
 the stage is the per-candidate masked loss matrix and the leftover-absorption perceiver calls), prediction 30.9 ->
 23.8 s; ledger vs V14M3: NS +0.000 pp (5/1 spills at the rounding level), all-TPC -0.001 (7/4): assignment-neutral.**
-V15S2 = S1 + the CPU fixes above + precision convolution cache + Michel perceiver batch 32 (running).
+V15S2 = S1 + the CPU fixes above + precision convolution cache + Michel perceiver batch 32: ABORTED twice with CUDA
+out-of-memory in the other worker's stage-1 prediction (the Michel batch of 32 and, separately, a GPU-resident precision
+cache of ~5 GB per spill both collide with the 5.7 GiB batch-32 forward of the worker sharing the GPU); relaunched as
+V15S2c with the Michel batch at 16 and the precision cache holding CPU arrays only (the arrival histogram and the
+interpolation indices; the GPU FFT is redone, it is cheap).  V15S2c still ran out of memory: the real leak was the
+CPU-copy cache of the backbone shift helper, which held a strong reference to every event's GPU image maps through a
+closure that outlives the event (30 GB in one worker after a few spills); the cache is now id-keyed with a weak
+reference check and no strong reference (V15S2d).
+**V15S2d (63 spills, `testing/speed_cert_V15S2d.log`): event median 122.4 s (mean 123.3 = 61.7 s per spill per GPU;
+v11_ab's paired median 118 s), p90 160; ledger vs V14M3 NS +0.002 pp (7/1), all-TPC -0.000 (8/4): assignment-neutral.
+Stage means: clustering+prediction 40.2 (perceiver 23.4, frontend clustering 10.5, track stage 4.1), force + Michel
+stages 14.0, precision 13.0, backbone 12.6, v200 8.6, pass2 8.0, joint 7.9, matrix 7.8, rescue 3.8, police 1.0.**
+V15S3 = S2d + precision rounds 2 + stage 4.86 probe-only (`--mfl-set probe_long=0`) + frontend RANSAC GPU threshold
+300 points (`clmatching-frontend/params_speed.json`; the GPU path only accelerates the hypothesis argmax, same RNG
+stream) + a separate timer for the MC-truth extraction (`tim["truth_s"]`): these change results and are validated
+by the ledger, the precision per-hit resolution and the Michel metric.

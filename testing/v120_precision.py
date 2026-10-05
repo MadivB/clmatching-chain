@@ -147,22 +147,21 @@ def _family_channels(hx, he, apexes, chans, sipm_c, R, W, ks, t_chain, calib, pi
         m = ((ks[None, :] - t_chain - SCAN_[:, None]) * NS - ARR_LO) / FINE
         m = np.clip(m, 0, nconv - 1.001)
         i0 = np.floor(m).astype(np.int64); fr = m - i0
+    if hit is not None:
+        rho, i0, fr = hit
+    elif key is not None:
+        if len(_CONV_CACHE) > 20000:
+            _CONV_CACHE.clear()
+        _CONV_CACHE[key] = (rho, i0, fr)          # CPU arrays only (a GPU-side cache held ~5 GB during the stage and starved the other worker)
     if _torch_dev() in ("cuda", "tcpu"):
         import torch
         dev = "cuda" if _torch_dev() == "cuda" else "cpu"
-        if hit is None:
-            rho_t = torch.from_numpy(rho).to(dev)
-            tf_f = _TORCH.get("tf_f_" + dev)
-            if tf_f is None:
-                tf_f = torch.fft.rfft(torch.from_numpy(T["tf"]).to(dev), T["nfft"]); _TORCH["tf_f_" + dev] = tf_f
-            conv_t = torch.fft.irfft(torch.fft.rfft(rho_t, T["nfft"], dim=1) * tf_f[None, :], T["nfft"], dim=1)[:, :nconv]
-            i0_t = torch.from_numpy(i0).to(dev); fr_t = torch.from_numpy(fr).to(dev)
-            if key is not None:
-                if len(_CONV_CACHE) > 20000:
-                    _CONV_CACHE.clear()
-                _CONV_CACHE[key] = ("t", conv_t, i0_t, fr_t)
-        else:
-            _, conv_t, i0_t, fr_t = hit
+        rho_t = torch.from_numpy(rho).to(dev)
+        tf_f = _TORCH.get("tf_f_" + dev)
+        if tf_f is None:
+            tf_f = torch.fft.rfft(torch.from_numpy(T["tf"]).to(dev), T["nfft"]); _TORCH["tf_f_" + dev] = tf_f
+        conv_t = torch.fft.irfft(torch.fft.rfft(rho_t, T["nfft"], dim=1) * tf_f[None, :], T["nfft"], dim=1)[:, :nconv]
+        i0_t = torch.from_numpy(i0).to(dev); fr_t = torch.from_numpy(fr).to(dev)
         M_t = conv_t[:, i0_t] * (1.0 - fr_t)[None] + conv_t[:, i0_t + 1] * fr_t[None]
         R_t = torch.from_numpy(R).to(dev); W_t = torch.from_numpy(W).to(dev)
         den_t = torch.einsum("ck,csk,csk->cs", W_t, M_t, M_t)
@@ -172,14 +171,7 @@ def _family_channels(hx, he, apexes, chans, sipm_c, R, W, ks, t_chain, calib, pi
         Ls = torch.einsum("ck,csk->cs", W_t, resid_t * resid_t).cpu().numpy()
         amps = amps_t.cpu().numpy(); conv_max = conv_t.max(dim=1).values.cpu().numpy()
     else:
-        if hit is None:
-            conv = np.fft.irfft(np.fft.rfft(rho, T["nfft"], axis=1) * T["tf_f"][None, :], T["nfft"], axis=1)[:, :nconv]
-            if key is not None:
-                if len(_CONV_CACHE) > 20000:
-                    _CONV_CACHE.clear()
-                _CONV_CACHE[key] = ("n", conv, i0, fr)
-        else:
-            _, conv, i0, fr = hit
+        conv = np.fft.irfft(np.fft.rfft(rho, T["nfft"], axis=1) * T["tf_f"][None, :], T["nfft"], axis=1)[:, :nconv]
         M = conv[:, i0] * (1.0 - fr)[None] + conv[:, i0 + 1] * fr[None]      # (nc, nS, nk)
         den = np.einsum("ck,csk,csk->cs", W, M, M)
         num = np.einsum("ck,ck,csk->cs", W, R, M)
