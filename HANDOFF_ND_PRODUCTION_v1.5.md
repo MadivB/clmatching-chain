@@ -99,3 +99,38 @@ This is the v1.0 production schema (`testing/make_pt_v1.py`) plus the ns copies 
   (interaction-level recovery 32–42 %); delayed Michels are 17–21 % correctly timed (pile-up), prompt ones 95 %.
 - Documents: `VERSION_HISTORY.md` (living record), `V130_CHAIN_REPORT.md` (method + ledger + timing),
   `V130_PHYSICS_CAPABILITIES.md` (what the output is good for), `V040_ALGORITHM.md` (stage numbering).
+
+## 7. Ten-file sample (files 1–10, 126 spills, run 2026-10-05, `/pscratch/sd/y/yuxuan/v15_10files_b`)
+
+Outputs: `/pscratch/sd/y/yuxuan/v15_10files_b/pt/<flow basename>.v1_5.pt` (10 files, 2.17–2.38 M prompt hits each,
+99.6–100 % assigned, confidence for 98 % of the hits, timing sigma for 99 %); event rows and per-spill dumps alongside.
+
+| file | NS efficiency | all-TPC accuracy | spills | median s per spill |
+|---|---|---|---|---|
+| 0000001 | 96.93 | 96.19 | 13 | 123.5 |
+| 0000002 | 97.23 | 96.80 | 13 | 118.3 |
+| 0000003 | 97.10 | 96.18 | 13 | 119.1 |
+| 0000004 | 96.75 | 95.08 | 12 | 129.1 |
+| 0000005 | 96.68 | 95.26 | 12 | 129.2 |
+| 0000006 | 96.40 | 95.86 | 13 | 114.7 |
+| 0000007 | 96.77 | 96.06 | 13 | 99.5 |
+| 0000008 | 96.69 | 96.30 | 12 | 113.9 |
+| 0000009 | 97.24 | 96.77 | 13 | 109.4 |
+| 0000010 | 96.86 | 96.43 | 12 | 117.9 |
+| **all, energy-weighted** | **96.87** | **96.09** | 126 | 118.4 (p90 157) |
+
+Per-hit timing (assigned hits with truth; the window selects on the final time; residual = t_reco − t_truth in ns):
+
+| selection | hits | stage | std | robust sigma | \|dt\| p68 |
+|---|---|---|---|---|---|
+| within 5 ticks | 21.94 M (96.1 %) | integer-tick assignment (before stage 6) | 8.09 | 6.72 | 6.69 |
+| | | after sub-tick, before precision (before stage 7) | 7.41 | 5.79 | 5.74 |
+| | | **after precision (v1.5 final)** | **4.86** | **2.75** | **2.77** |
+| within 2 ticks | 21.86 M (95.8 %) | integer-tick assignment | 7.43 | 6.69 | 6.65 |
+| | | after sub-tick, before precision | 6.70 | 5.77 | 5.71 |
+| | | **after precision (v1.5 final)** | **3.58** | **2.74** | **2.76** |
+
+The precision stage halves the core width (robust sigma 5.8 → 2.75 ns) and removes the ±8 ns comb of the
+integer-tick assignment; the remaining median offset of −5.6 ns is a global constant (a detector-type / template
+offset, see VERSION_HISTORY v1.2) that a single calibration constant removes.  Histograms:
+`testing/michel_nd_out/tenfile/v15_tenfile_precision_hist_linear.png` and `..._hist.png` (log scale).

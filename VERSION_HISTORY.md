@@ -1151,3 +1151,10 @@ short of fewer groups or a smaller model), frontend clustering 10.5 s and track 
 13 s (torch per-family fits, 2,500 calls), backbone 12.6 s (pool chunk search, swap pass), v200 8.7 s (exact-delta
 block solver), pass2 8 s (KD-tree queries per candidate), joint 8 s (pairwise light-coupling matmuls over full
 windows), matrix 7.9 s (masked loss matrix + leftover-absorption perceiver calls), Michel stages 7.2 + 2.9 s.
+
+**Ten-file v1.5 sample (2026-10-05, files 1-10, 126 spills, `/pscratch/sd/y/yuxuan/v15_10files_b`, .pt files in
+`.../pt/`, report `testing/v15_tenfile_report.py`, figures `testing/michel_nd_out/tenfile/`):** NS efficiency 96.87 %,
+all-TPC accuracy 96.09 % (energy-weighted; per file 96.40-97.24 / 95.08-96.80), event median 118.4 s (p90 157) at
+8 workers on 4 GPUs; per-hit timing residual within 5 ticks of truth (21.9 M hits): integer-tick assignment std 8.09 /
+robust 6.72 ns -> after subtick 7.41 / 5.79 -> after precision 4.86 / 2.75 ns; within 2 ticks: 7.43 / 6.69 -> 6.70 /
+5.77 -> 3.58 / 2.74 ns; median offset -5.6 ns (global constant).  Handoff document `HANDOFF_ND_PRODUCTION_v1.5.md`.
