@@ -857,6 +857,20 @@ works and is clean, but it adds ~0.4 GeV per 63 spills (+1.2 pp on the delayed M
 it can only see the isolated third of the delayed Michels and the light test then passes a quarter of those.
 Harness: `--michel-flash --mfl-set k=v` (stage 4.86, after 4.85, shares its predictor); certification arm V14M3 =
 V14M2 + `--michel-flash` (`testing/sbatch_v14m_V14M3.sh`, launched 2026-10-05).
+
+**CERTIFIED (arm V14M3 = V14M2 + stage 4.86, 63 spills, in-chain, 2026-10-05; `testing/v14m_cert_V14M3.log`):**
+
+| | v1.4 (V14A) | + 4.85 revised (V14M2) | + 4.85 + 4.86 (V14M3) |
+|---|---|---|---|
+| NS efficiency | 96.89 | 96.92 (+0.033, 38/6) | 96.93 (+0.047 pp, 46/6) |
+| all-TPC accuracy | 95.86 | 95.89 (+0.024, 44/9) | 95.90 (+0.034 pp, 48/9) |
+| stage 4.86 moves, fixed / broke | | | 31, 0.43 / 0.04 GeV (87 % right) |
+| stage 4.86 time per spill, median (p90) | | | 4.6 s (7.2) |
+| event median | 129 s | 142.9 s | 147.7 s |
+
+V14M3 vs V14M2 directly: NS +0.014 pp (19/3 spills), all-TPC +0.010 (23/3), every file up; wrong energy total
+159.69 -> 159.31 GeV.  Stage 4.86 in-chain: 28 flashes, 297 candidates, 130 pairs, 220 predictions per spill.
+run_v15.sh now carries `--michel-flash` (one flag to drop it); adoption of v1.5 = user's call.
   Speed levers left:
 the perceiver's ~11 ms per piece is per-group overhead (grouping / voxelisation), not GPU compute - a piece-level
 voxeliser that reuses the host cluster's voxel grid, or an amplitude-native (no image) prediction path, would take the

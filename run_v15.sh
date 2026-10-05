@@ -1,6 +1,8 @@
 #!/bin/bash
 # v1.5 CANDIDATE (2026-10-02) = v1.4 chain (run_v14.sh) + stage 4.85 Michel / delayed-daughter re-timing (testing/michel_nd.py):
 #   --michel-nd ...   piece-first: Bragg-attached end pieces (free tip whose geodesic growth is stopped by a Bragg ball
+#   --michel-flash    stage 4.86 (2026-10-05): unexplained residual flashes at track ends (testing/michel_flash.py), after 4.85;
+#                     cert V14M3: +0.014 pp NS over V14M2 (19/3), 31 moves 0.43 / 0.04 GeV, 4.6 s/spill; drop the flag to remove it
 #                     2026-10-02 recall-audit configuration: tip >= 5 cm from the outer face, local band dE/dx <= 5 MeV/cm behind
 #                     the Bragg stop (replaces the cluster E/extent cap), host-remainder rule (piece may out-weigh a short pion host, host
 #                     remainder >= 10 MeV), piece light gates mf 0.75 / apc -0.25 (whole clusters keep 0.8 / -0.5), piece predictions not
@@ -69,6 +71,7 @@ V15="--backbone stack2 --merge-p2 --sigma-mode poisson --max-clip-ticks 4 \
 --v200-min-e 20 --force-light-cm 20 --resid-fill \
 --michel-nd --mnd-host-extent-cm 20 --mnd-bragg-end-cm 20 --mnd-piece-max-mev 60 --mnd-delay-max 300 --mnd-batch 16 \
 --mnd-tip-face-cm 5 --mnd-set band_dedx_max=5 max_frac=1.0 remainder_min_mev=10 mf_min=0.75 apc_max=-0.25 whole_mf_min=0.8 whole_apc_max=-0.5 \
+--michel-flash \
 --subtick --conf-cluster --light-ckpt $SMALL --frontend-repo $FRONTEND"
 
 mkdir -p "$OUT"

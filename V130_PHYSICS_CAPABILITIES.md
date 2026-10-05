@@ -272,7 +272,8 @@ Event displays of types 1-5: `testing/v12_displays/` (light-vs-prediction, reco 
   `testing/michel_nd_out/waveforms/`. A candidate generator keyed to unexplained flashes near track ends was built
   (stage 4.86, 2026-10-05): it finds a flash for 24 % of the delayed Michel energy (73 % of the isolated Michels; the
   rest share their flash time with a placed family and are invisible to any residual finder), and adds ~0.4 GeV per
-  63 spills at 87 % purity for 4 s per spill, taking the delayed class from 10.1 to 11.3 %. The remaining two thirds
+  63 spills at 87 % purity for 4 s per spill, taking the delayed class from 10.1 to 11.3 % (certified in-chain as
+  V14M3: NS +0.014 pp over the piece-first arm, 19 of 22 differing spills up). The remaining two thirds
   of the delayed Michels sit under another family's light and need a joint (two-time) treatment of the host cluster.
 - **Low-energy physics (isolated 1-20 MeV deposits) is the weak point**: interaction-level recovery 32-42 %, hit accuracy
   66-87 %. The measured cause is the light-prediction engine at low energy. A physics goal that rests on isolated
