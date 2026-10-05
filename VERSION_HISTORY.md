@@ -871,6 +871,9 @@ V14M2 + `--michel-flash` (`testing/sbatch_v14m_V14M3.sh`, launched 2026-10-05).
 V14M3 vs V14M2 directly: NS +0.014 pp (19/3 spills), all-TPC +0.010 (23/3), every file up; wrong energy total
 159.69 -> 159.31 GeV.  Stage 4.86 in-chain: 28 flashes, 297 candidates, 130 pairs, 220 predictions per spill.
 run_v15.sh now carries `--michel-flash` (one flag to drop it); adoption of v1.5 = user's call.
+Direct Michel metric V14A / V14M2 / V14M3 (`michel_nd_out/michel_metric_v14m3.log`): all Michels 33.3 / 37.0 / 38.6 %;
+no family within 5 ticks of the Michel flash 3.7 / 8.6 / 14.4 % (the flash stage's niche); delay 30-100 ticks 12.8 /
+17.6 / 19.1 %, 100-300 ticks 11.1 / 18.8 / 21.0 %; muon-hosted 54.7 / 58.4 / 60.8 %, pion-hosted 17.6 / 21.5 / 22.5 %.
   Speed levers left:
 the perceiver's ~11 ms per piece is per-group overhead (grouping / voxelisation), not GPU compute - a piece-level
 voxeliser that reuses the host cluster's voxel grid, or an amplitude-native (no image) prediction path, would take the
