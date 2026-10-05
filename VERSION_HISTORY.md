@@ -814,6 +814,40 @@ with the measured 1-20 ADC per photon of the same tables' brighter flashes; not 
 ceiling is the geometric candidate generator (Bragg-ball requirement and host-extent gate above all: stopping muons have
 no detectable Bragg ball at the 5 MeV / 1.5 cm dense-point definition, short pions fail the 20 cm extent), not the
 light.  The light of a typical uncovered Michel is 0.5x the pile-up on its best channel and 1-10x on isolated ones.
+
+#### Stage 4.86 "unexplained flashes at track ends" (2026-10-05, user's request; `testing/michel_flash.py`, evaluator
+`v14_michel_nd_eval.py --flash / --flash-only / --fset`, audit `v15_michel_audit.py --flash`)
+
+Design: per light TPC, residual flashes = local maxima of the summed positive residual (actual - chain model, non-vetoed
+channels) with sum >= 10,000 ADC, >= 5 channels where the residual is >= 300 ADC and >= 30 % of the actual, residual /
+actual >= 0.3 on those channels, a rise (S[t] - S[t-6]) / S[t] >= 0.2, no placed family within 10 ticks, channels above
+half the maximum spanning <= 120 cm in y (ND light channels sit on the +-z faces, sorted in y; a whole-wall residual is a
+big-flash mismatch), at most 8 per TPC.  Candidates per flash: EVERY skeleton tip of every cluster >= 10 MeV in the TPC
+whose current time is >= 12 ticks before the flash and whose tip lies within 30 cm (y) of the flash's lit range, the 8
+nearest in y, grown 2-16 cm (piece 5-60 MeV, host remainder >= 10 MeV) - no Bragg, extent or dE/dx rule; plus whole
+clusters 5-80 MeV in the window.  One batched perceiver call for the 5 cm probe AND the longest piece of each tip; each
+(flash, piece) scored at the flash time with the stage-4.85 tests, the residual measured above its per-channel median
+over the 12 ticks before the flash and the amplitude scale fitted inside the flash window (the full-trace product
+multiplies the template's slow tail with the decaying residual of earlier flashes and went negative: v2 defect, fixed
+in v3); passing pieces refined over lengths; best per flash, one move per cluster.
+
+What the finder sees (10 spills, CPU census): 71 % of residual flashes have NO charge within 5 ticks (light with no hits:
+dead regions, between modules), 24 % sit on charge already timed right (model deficit), 5 % on mistimed charge >= 5 MeV;
+22 of 23 Michel flashes are in the last class.  Michel flashes: summed residual 17-45k ADC, 6-30 lit channels.  The
+first version (sum >= 3,000, 3 channels, rise 0.2) produced 108-198 flashes and up to 6,000 flash-tip pairs per spill
+(34 s); the thresholds above give 28 per spill.
+
+Per-Michel audit (20 spills, after the v1.5 piece-first stage): a flash within 5 ticks of the Michel exists for 24 %
+of the delayed Michel energy (73 % of the isolated Michels; 76 % have no flash: a placed family within 10 ticks for
+most of them, i.e. the flash is explained or shared - the finder is blind there by construction); a piece covers 19 %;
+a hypothesis at the true time 17 %; passing 4 % (73 % correct afterwards); failing: mf 10 %, alpha 10 %, apc 9 %.
+Michel probes at the right time read mf 0.78 / alpha 1.0 / apc -0.5 (medians); non-Michel probes mf 0.36 / alpha 0.0.
+Offline gate scan (20 spills, probes): mf 0.75 / apc -0.25 -> 12 moves, 60 % right, fixed 97 / broke 65 MeV; mf 0.8 /
+apc -0.5 -> 9 moves, 89 % right, 97 / 13 MeV (adopted for this stage; the flash prior does not buy a looser light gate).
+63 spills, v2 gates (mf 0.75 / apc -0.25, before the alpha fix), run after the v1.5 stage: flash stage 44 moves, fixed
+0.43 / broke 0.28 GeV (43 pieces: 24 right 417 MeV, 15 wrong 232 MeV, 13 of them true breaks; wrong ones read mf 0.82 vs
+0.89 and apc -0.64 vs -1.02), 28 flashes / 297 candidates / 130 pairs / 222 predictions per spill, 4.5 s per spill;
+combined 159 moves, 1.70 / 0.55 GeV, delayed class 6.5 -> 11.6 % (piece-first alone 10.1 %), 11.3 s per spill.
   Speed levers left:
 the perceiver's ~11 ms per piece is per-group overhead (grouping / voxelisation), not GPU compute - a piece-level
 voxeliser that reuses the host cluster's voxel grid, or an amplitude-native (no image) prediction path, would take the

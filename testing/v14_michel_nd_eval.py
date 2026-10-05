@@ -25,7 +25,14 @@ TMP0 = 1_000_000
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("dump_dir"); ap.add_argument("--events", type=int, default=0); ap.add_argument("--files", default=None)
     ap.add_argument("--out", default=os.path.join(HERE, "michel_nd_out", "eval.json")); ap.add_argument("--set", nargs="*", default=[]); ap.add_argument("--batch", type=int, default=64)
+    ap.add_argument("--flash", action="store_true"); ap.add_argument("--flash-only", action="store_true"); ap.add_argument("--fset", nargs="*", default=[])
     a = ap.parse_args(); cfg = MichelNDConfig()
+    from michel_flash import run_michel_flash, MichelFlashConfig, channel_positions
+    fcfg_ = MichelFlashConfig()
+    for kv in a.fset:
+        k, v = kv.split("="); cur = getattr(fcfg_, k)
+        setattr(fcfg_, k, float(v) if cur is None else (type(cur)(float(v)) if isinstance(cur, (int, float)) and not isinstance(cur, bool) else (v.lower() in ("1", "true") if isinstance(cur, bool) else v)))
+    CHPOS = {}
     for kv in a.set:
         k, v = kv.split("="); cur = getattr(cfg, k)
         setattr(cfg, k, float(v) if cur is None else (type(cur)(float(v)) if isinstance(cur, (int, float)) and not isinstance(cur, bool) else (v.lower() in ("1", "true") if isinstance(cur, bool) else v)))
@@ -78,8 +85,21 @@ def main():
                 for j, k in pm["keys"]:
                     v = amps.get((TMP0 + j, k[1])); out[k] = np.asarray(v, np.float64) if v is not None else np.zeros(A.shape[1])
             return out
-        st = run_michel_nd(xyz=np.stack([x, y, zz], 1).astype(np.float64), e=e, tpc=tpc, labels=labs, ts=ts, amp=amp, actual=A, base=B, veto=veto, ceil=ceil,
-                           template=T, predict_fn=predict_fn, cfg=cfg, truth_t0=tru, apply=True)
+        XYZ = np.stack([x, y, zz], 1).astype(np.float64)
+        if a.flash_only:
+            st = dict(n_cand=0, n_whole=0, n_pred=0, n_moves=0, moves=[], tim={}, time_s=0.0, fixed_e=0.0, broke_e=0.0)
+        else:
+            st = run_michel_nd(xyz=XYZ, e=e, tpc=tpc, labels=labs, ts=ts, amp=amp, actual=A, base=B, veto=veto, ceil=ceil, template=T, predict_fn=predict_fn, cfg=cfg, truth_t0=tru, apply=True)
+        if a.flash or a.flash_only:
+            src = str(z["src_file"])
+            if src not in CHPOS:
+                import h5py
+                CHPOS[src] = channel_positions(h5py.File(src, "r"))
+            stf = run_michel_flash(xyz=XYZ, e=e, tpc=tpc, labels=labs, ts=ts, amp=amp, actual=A, base=B, veto=veto, ceil=ceil, template=T, predict_fn=predict_fn, ch_pos=CHPOS[src], cfg=fcfg_, truth_t0=tru, apply=True)
+            st["moves"] = st["moves"] + stf["moves"]; st["fixed_e"] += stf["fixed_e"]; st["broke_e"] += stf["broke_e"]; st["time_s"] += stf["time_s"]; st["n_moves"] += stf["n_moves"]
+            st["flash"] = {k: stf[k] for k in ("n_flash", "n_cand", "n_pairs", "n_whole", "n_pred", "n_hyp", "n_moves", "fixed_e", "broke_e", "time_s", "tim")}
+            for k_, v_ in stf["tim"].items():
+                st["tim"]["f_" + k_] = v_
         Ea = float((e[dmask] * (np.abs(ts[dmask] - tru[dmask]) <= CUT)).sum())
         mv = st.pop("moves")
         for m in mv:
@@ -87,15 +107,19 @@ def main():
         all_moves += mv
         pt = {k: round(float(sum(t_[k] for t_ in pred_t)), 2) for k in ("grouping_s", "voxelize_s", "model_s", "materialize_s")} if pred_t else {}
         ev_stats.append(dict(ev=tag, **{k: v for k, v in st.items()}, E_del=E_del, E_del_before=Eb, E_del_after=Ea, pred_t=pt))
-        print(f"{tag}: pieces {st['n_cand']} wholes {st['n_whole']} pred {st['n_pred']} moves {st['n_moves']} fixed {st['fixed_e']:.0f} broke {st['broke_e']:.0f} MeV {st['time_s']:.1f}s {st['tim']}  (total {time.time()-t_begin:.0f}s)", flush=True)
+        fs = st.get("flash"); ftxt = f" | flash: flashes {fs['n_flash']} cand {fs['n_cand']} pairs {fs['n_pairs']} pred {fs['n_pred']} moves {fs['n_moves']} fixed {fs['fixed_e']:.0f} broke {fs['broke_e']:.0f} {fs['time_s']:.1f}s" if fs else ""
+        print(f"{tag}: pieces {st['n_cand']} wholes {st['n_whole']} pred {st['n_pred']} moves {st['n_moves']} fixed {st['fixed_e']:.0f} broke {st['broke_e']:.0f} MeV {st['time_s']:.1f}s {st['tim']}{ftxt}  (total {time.time()-t_begin:.0f}s)", flush=True)
     json.dump(dict(cfg={k: getattr(cfg, k) for k in dir(cfg) if not k.startswith("_")}, moves=all_moves, events=ev_stats), open(a.out, "w"), default=float)
     fx = sum(s_["fixed_e"] for s_ in ev_stats); br = sum(s_["broke_e"] for s_ in ev_stats); Ed = sum(s_["E_del"] for s_ in ev_stats); Eb = sum(s_["E_del_before"] for s_ in ev_stats); Ea = sum(s_["E_del_after"] for s_ in ev_stats)
     print(f"\n{len(files)} events: moves {len(all_moves)} (whole {sum(m['whole'] for m in all_moves)}); fixed {fx/1e3:.2f} broke {br/1e3:.2f} GeV net {(fx-br)/1e3:+.2f} purity {fx/max(fx+br,1e-9):.2f}; "
           f"events better/worse {sum(s_['fixed_e']>s_['broke_e']+0.5 for s_ in ev_stats)}/{sum(s_['broke_e']>s_['fixed_e']+0.5 for s_ in ev_stats)}; delayed class {Ed/1e3:.2f} GeV {Eb/max(Ed,1e-9):.3f} -> {Ea/max(Ed,1e-9):.3f}; time/ev {np.mean([s_['time_s'] for s_ in ev_stats]):.1f} s")
-    for lab, sel in (("pieces", [m for m in all_moves if not m["whole"]]), ("whole", [m for m in all_moves if m["whole"]])):
+    fl_ev = [s_["flash"] for s_ in ev_stats if s_.get("flash")]
+    if fl_ev:
+        print(f"   flash stage: flashes/ev {np.mean([f['n_flash'] for f in fl_ev]):.1f} cand {np.mean([f['n_cand'] for f in fl_ev]):.0f} pairs {np.mean([f['n_pairs'] for f in fl_ev]):.0f} pred {np.mean([f['n_pred'] for f in fl_ev]):.0f} moves {sum(f['n_moves'] for f in fl_ev)} fixed {sum(f['fixed_e'] for f in fl_ev)/1e3:.2f} broke {sum(f['broke_e'] for f in fl_ev)/1e3:.2f} GeV time/ev {np.mean([f['time_s'] for f in fl_ev]):.1f} s {dict((k, round(float(np.mean([f['tim'][k] for f in fl_ev])), 2)) for k in fl_ev[0]['tim'])}")
+    for lab, sel in (("pieces", [m for m in all_moves if not m["whole"] and m.get("stage") != "flash"]), ("whole", [m for m in all_moves if m["whole"] and m.get("stage") != "flash"]), ("flash-pieces", [m for m in all_moves if m.get("stage") == "flash" and not m["whole"]]), ("flash-whole", [m for m in all_moves if m.get("stage") == "flash" and m["whole"]])):
         if sel:
             fx = sum(max(m["now"] - m["was"], 0) for m in sel); br = sum(max(m["was"] - m["now"], 0) for m in sel); print(f"   {lab:7s} n {len(sel):3d} fixed {fx:6.0f} broke {br:5.0f} purity {fx/max(fx+br,1e-9):.2f}")
-    tt = {k: round(float(np.mean([s_["tim"][k] for s_ in ev_stats])), 2) for k in ev_stats[0]["tim"]} if ev_stats else {}
+    tt = {k: round(float(np.mean([s_["tim"].get(k, 0.0) for s_ in ev_stats])), 2) for k in ev_stats[0]["tim"]} if ev_stats else {}
     print("mean time per event by part:", tt)
 
 

@@ -30,11 +30,17 @@ TMP0 = 1_000_000
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("dump_dir"); ap.add_argument("--events", type=int, default=0); ap.add_argument("--files", default=None)
     ap.add_argument("--out", default=os.path.join(HERE, "michel_nd_out", "michel_audit.json")); ap.add_argument("--set", nargs="*", default=[]); ap.add_argument("--batch", type=int, default=16)
+    ap.add_argument("--flash", action="store_true"); ap.add_argument("--flash-only", action="store_true"); ap.add_argument("--fset", nargs="*", default=[])
     a = ap.parse_args()
     ALL_HYPS = []; cfg = MichelNDConfig()
     for kv in a.set:
         k, v = kv.split("="); cur = getattr(cfg, k)
         setattr(cfg, k, float(v) if cur is None else (type(cur)(float(v)) if isinstance(cur, (int, float)) and not isinstance(cur, bool) else (v.lower() in ("1", "true") if isinstance(cur, bool) else v)))
+    from michel_flash import run_michel_flash, MichelFlashConfig, channel_positions
+    fcfg_ = MichelFlashConfig(); CHPOS = {}
+    for kv in a.fset:
+        k, v = kv.split("="); cur = getattr(fcfg_, k)
+        setattr(fcfg_, k, float(v) if cur is None else (type(cur)(float(v)) if isinstance(cur, (int, float)) and not isinstance(cur, bool) else (v.lower() in ("1", "true") if isinstance(cur, bool) else v)))
     files = sorted(glob.glob(os.path.join(a.dump_dir, "full_dumps", "*.npz")))
     if a.files:
         tags = a.files.split(","); files = [f for f in files if any(os.path.basename(f).startswith(t) for t in tags)]
@@ -81,7 +87,8 @@ def main():
             c = int(np.bincount(tpc[hm]).argmax())
             info[m_row] = dict(ev=tag, michel=int(m_row), E=float(e[hm].sum()), n=int(hm.size), t=t_m, t_host=t_h, delay=t_m - t_h, host_kind=hk, E_host=float(e[hh].sum()),
                                cluster=Lm, merged=bool(Lm >= 0 and E_host_in >= 2.0), E_cluster=float(e[labs == Lm].sum()) if Lm >= 0 else 0.0, tpc=c,
-                               corr_before=float((e[hm] * (np.abs(ts[hm] - tru[hm]) <= CUT)).sum() / e[hm].sum()))
+                               corr_before=float((e[hm] * (np.abs(ts[hm] - tru[hm]) <= CUT)).sum() / e[hm].sum()),
+                               n_family_15=int(np.sum(np.abs(np.unique(np.round(ts[(tpc == c) & (labs >= 0) & np.isfinite(ts)])) - t_m) <= 15)))
         if not info:
             continue
         dbg = []
@@ -102,8 +109,21 @@ def main():
                 for j, k in pm["keys"]:
                     v = amps.get((TMP0 + j, k[1])); out[k] = np.asarray(v, np.float64) if v is not None else np.zeros(A.shape[1])
             return out
-        st = run_michel_nd(xyz=np.stack([x, y, zz], 1).astype(np.float64), e=e, tpc=tpc, labels=labs, ts=ts, amp=amp, actual=A, base=B, veto=veto, ceil=ceil,
-                           template=T, predict_fn=predict_fn, cfg=cfg, truth_t0=tru, apply=True, debug_tag=tagm, debug_out=dbg)
+        if not a.flash_only:
+            st = run_michel_nd(xyz=np.stack([x, y, zz], 1).astype(np.float64), e=e, tpc=tpc, labels=labs, ts=ts, amp=amp, actual=A, base=B, veto=veto, ceil=ceil,
+                               template=T, predict_fn=predict_fn, cfg=cfg, truth_t0=tru, apply=True, debug_tag=tagm, debug_out=dbg)
+        dbgf = []
+        if a.flash or a.flash_only:
+            src = str(z["src_file"])
+            if src not in CHPOS:
+                CHPOS[src] = channel_positions(h5)
+            stf = run_michel_flash(xyz=np.stack([x, y, zz], 1).astype(np.float64), e=e, tpc=tpc, labels=labs, ts=ts, amp=amp, actual=A, base=B, veto=veto, ceil=ceil,
+                                   template=T, predict_fn=predict_fn, ch_pos=CHPOS[src], cfg=fcfg_, truth_t0=tru, apply=True, debug_tag=tagm, debug_out=dbgf)
+            print(f"   flash stage: flashes {stf['n_flash']} cand {stf['n_cand']} pairs {stf['n_pairs']} pred {stf['n_pred']} moves {stf['n_moves']} fixed {stf['fixed_e']:.0f} broke {stf['broke_e']:.0f} {stf['time_s']:.1f}s", flush=True)
+        FL = next((d["flashes"] for d in dbgf if d["kind"] == "flashes"), []); GEOF = next((d for d in dbgf if d["kind"] == "geometry"), {}); covered_f = GEOF.get("covered", {})
+        hyps_f = [d for d in dbgf if d["kind"] in ("probe", "refine", "whole")]
+        for d in hyps_f:
+            ALL_HYPS.append(dict(ev=tag, stage="flash", **{k: v for k, v in d.items() if k != "comp"}, michel_E=float(sum(d["comp"].values()))))
         geo = next((d for d in dbg if d["kind"] == "geometry"), {}); covered = geo.get("covered", {}); covered_w = geo.get("covered_whole", {})
         hyps = [d for d in dbg if d["kind"] not in ("geometry", "cand", "candw")]; cand_recs = [d for d in dbg if d["kind"] in ("cand", "candw")]
         for d in hyps:
@@ -198,6 +218,14 @@ def main():
             elif H:
                 b = max(H, key=lambda d: d["mf"]); rec["best_other_time"] = {k: b[k] for k in ("kind", "E_p", "mf", "tf", "ok")}
             rec["corr_after"] = float((e[tagm == m_row] * (np.abs(ts[tagm == m_row] - tru[tagm == m_row]) <= CUT)).sum() / Em)
+            if a.flash or a.flash_only:
+                fl_c = [f for f in FL if f["c"] == rec["tpc"]]; dts = [abs(f["tf"] - rec["t"]) for f in fl_c]
+                rec["flash_near"] = bool(dts and min(dts) <= 5.0); rec["flash_dt"] = float(min(dts)) if dts else None; rec["flash_n_tpc"] = len(fl_c)
+                rec["flash_covered"] = float(covered_f.get(m_row, 0.0) / Em)
+                Hf = [d for d in hyps_f if d["comp"].get(m_row, 0.0) >= 0.5 * Em]; nearf = [d for d in Hf if abs(d["tf"] - rec["t"]) <= 5.0]
+                rec["flash_n_hyp"] = len(Hf); rec["flash_n_hyp_true"] = len(nearf)
+                if nearf:
+                    b = max(nearf, key=lambda d: d["mf"]); rec["flash_best"] = {k: b[k] for k in ("kind", "E_p", "mf", "alpha", "apc", "sat", "cov", "unexpl", "ok", "tf")}
             audit.append(rec)
         print(f"{tag}: Michels {len(info)}, hypotheses recorded {len(hyps)}, stage {st['time_s']:.1f}s  (total {time.time()-t_begin:.0f}s)", flush=True)
     json.dump(dict(cfg={k: getattr(cfg, k) for k in dir(cfg) if not k.startswith("_")}, audit=audit, hyps=ALL_HYPS), open(a.out, "w"), default=float)
@@ -265,6 +293,24 @@ def main():
         frac([r for r in R if r["host_kind"] == hk], f"host {hk}"); frac([r for r in R if r["host_kind"] == hk and r["covered_frac"] >= 0.5], f"   host {hk}: covered")
     frac([r for r in R if r["merged"]], "merged with the host"); frac([r for r in R if not r["merged"]], "own cluster")
     frac([r for r in R if not r["merged"] and r["covered_frac"] < 0.5], "   own cluster, not covered (whole-cluster window 5-80 MeV / templated?)")
+    if a.flash or a.flash_only:
+        print("\n  --- flash-at-track-end stage (4.86) recall chain on the delayed Michels ---")
+        fn = [r for r in R if r.get("flash_near")]; frac(fn, "a residual flash within 5 ticks of the Michel time in its TPC")
+        frac([r for r in R if r.get("flash_near") is False], "   no flash found")
+        frac([r for r in R if r.get("flash_near") is False and r.get("n_family_15", 1) == 0], "      (of which: no family within 15 ticks)")
+        frac([r for r in fn if r.get("flash_covered", 0) >= 0.5], "   flash found AND a piece mask holds >= 50 % of the Michel")
+        frac([r for r in fn if r.get("flash_covered", 0) < 0.5], "   flash found, no piece holds >= 50 %")
+        tt_ = [r for r in fn if r.get("flash_n_hyp_true", 0) > 0]; frac(tt_, "   hypothesis at the true time")
+        frac([r for r in tt_ if r["flash_best"]["ok"]], "      passing all gates"); frac([r for r in tt_ if not r["flash_best"]["ok"]], "      failing gates")
+        for g_ in ("mf", "apc", "alpha", "unexpl", "cov"):
+            lim = dict(mf=("<", fcfg_.mf_min), apc=(">", fcfg_.apc_max), alpha=("out", (fcfg_.alpha_lo, fcfg_.alpha_hi)), unexpl=("<", fcfg_.unexpl_min_frac), cov=("<", fcfg_.cov_min))[g_]
+            def fails(b, g_=g_, lim=lim):
+                v = b.get(g_)
+                if v is None or not np.isfinite(v): return True
+                return (v < lim[1]) if lim[0] == "<" else ((v > lim[1]) if lim[0] == ">" else (v < lim[1][0] or v > lim[1][1]))
+            frac([r for r in tt_ if not r["flash_best"]["ok"] and fails(r["flash_best"])], f"         fails {g_}")
+        for hk in ("mu", "pi"):
+            frac([r for r in fn if r["host_kind"] == hk], f"   flash found, host {hk}")
 
 
 if __name__ == "__main__":
