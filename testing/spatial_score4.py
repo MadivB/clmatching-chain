@@ -59,6 +59,20 @@ def lsq_vertex(track_shapes):
     return np.linalg.solve(A, b)
 
 
+def _member_arrays(F):
+    """per-family cache of stacked member geometry for pair_features2 (speed campaign 2026-10-05; identical results)"""
+    ma = F.get("_marr")
+    if ma is None:
+        mem = F["members2"]
+        ma = dict(mu=np.array([m[0]["mu"] for m in mem], float).reshape(-1, 3), v1=np.array([m[0]["v1"] for m in mem], float).reshape(-1, 3),
+                  ends=np.array([np.asarray(m[0]["ends"], float).reshape(-1, 3) for m in mem]).reshape(len(mem), -1, 3) if mem else np.zeros((0, 2, 3)),
+                  length=np.array([float(m[0]["length"]) for m in mem]), is_track=np.array([m[2] == "track" for m in mem]), is_shower=np.array([m[2] == "shower" for m in mem]),
+                  start=np.array([np.asarray(m[3], float) if m[3] is not None else np.full(3, np.nan) for m in mem]).reshape(-1, 3),
+                  mdir=np.array([np.asarray(m[4], float) if m[4] is not None else np.full(3, np.nan) for m in mem]).reshape(-1, 3))
+        F["_marr"] = ma
+    return ma
+
+
 def pair_features2(csh, F):
     out = {}
     c_ax_ok = csh["xyz"].shape[0] >= 6 and csh["lin"] >= 0.5
@@ -67,10 +81,11 @@ def pair_features2(csh, F):
         q = q[:: q.shape[0] // 40 + 1]
 
     # best member by hit distance (limit to the 8 nearest members by centroid)
-    mem = F["members2"]
+    mem = F["members2"]; ma = _member_arrays(F); sel = np.arange(len(mem))
     if len(mem) > 8:
-        dc = [float(np.linalg.norm(m[0]["mu"] - csh["mu"])) for m in mem]
-        mem = [mem[i] for i in np.argsort(dc)[:8]]
+        dc = np.linalg.norm(ma["mu"] - csh["mu"][None, :], axis=1)
+        sel = np.argsort(dc, kind="stable")[:8]
+        mem = [mem[i] for i in sel]
     best = None
     for mi, (msh, mtree, mtype, mstart, mdir) in enumerate(mem):
         dm, _ = mtree.query(q, k=1)
@@ -84,29 +99,24 @@ def pair_features2(csh, F):
     out["m_is_shower"] = float(mtype == "shower")
     out["m_lin"] = msh["lin"]
 
-    # ---- v3: feature-wise BEST member (independent of the nearest one) ----
-    best_lat = best_gap = best_cone = best_cont_sc = np.nan
-    for msh2, mtree2, mtype2, mstart2, mdir2 in mem:
-        u2 = (csh["mu"] - msh2["mu"]) @ msh2["v1"]
-        lat2 = float(np.linalg.norm((csh["mu"] - msh2["mu"]) - u2 * msh2["v1"]))
-        if not np.isfinite(best_lat) or lat2 < best_lat:
-            best_lat = lat2
-        g2 = min(float(np.linalg.norm(ce - me2))
-                 for ce in csh["ends"] for me2 in msh2["ends"])
-        if not np.isfinite(best_gap) or g2 < best_gap:
-            best_gap = g2
-        if mtype2 == "shower":
-            r2 = csh["mu"] - mstart2
-            cc = float(np.dot(r2, mdir2) / max(np.linalg.norm(r2), 1e-9))
-            if not np.isfinite(best_cone) or cc > best_cone:
-                best_cone = cc
-        if mtype2 == "track" and c_ax_ok:
-            ax2 = float(abs(np.dot(csh["v1"], msh2["v1"])))
-            half2 = max(msh2["length"] / 2.0, 1e-9)
-            beyond2 = abs(u2) > half2
-            sc = ax2 * (1.0 if beyond2 else 0.3) / (1.0 + g2 / 5.0)
-            if not np.isfinite(best_cont_sc) or sc > best_cont_sc:
-                best_cont_sc = sc
+    # ---- v3: feature-wise BEST member (independent of the nearest one), vectorised over the selected members ----
+    mu_m = ma["mu"][sel]; v1_m = ma["v1"][sel]; ends_m = ma["ends"][sel]; len_m = ma["length"][sel]; trk = ma["is_track"][sel]; shw = ma["is_shower"][sel]
+    dmu = csh["mu"][None, :] - mu_m                                   # (M, 3)
+    u2 = np.einsum("ij,ij->i", dmu, v1_m)                             # (M,)
+    lat2 = np.linalg.norm(dmu - u2[:, None] * v1_m, axis=1)
+    cends = np.asarray(csh["ends"], float).reshape(-1, 3)
+    g2 = np.linalg.norm(cends[None, :, None, :] - ends_m[:, None, :, :], axis=3).reshape(len(sel), -1).min(axis=1)   # min over (c end, m end)
+    best_lat = float(lat2.min()) if lat2.size else np.nan
+    best_gap = float(g2.min()) if g2.size else np.nan
+    best_cone = np.nan
+    if shw.any():
+        r2 = csh["mu"][None, :] - ma["start"][sel][shw]; rn = np.maximum(np.linalg.norm(r2, axis=1), 1e-9)
+        cc = np.einsum("ij,ij->i", r2, ma["mdir"][sel][shw]) / rn; best_cone = float(cc.max())
+    best_cont_sc = np.nan
+    if c_ax_ok and trk.any():
+        ax2 = np.abs(v1_m[trk] @ np.asarray(csh["v1"], float)); half2 = np.maximum(len_m[trk] / 2.0, 1e-9)
+        beyond2 = np.abs(u2[trk]) > half2
+        sc = ax2 * np.where(beyond2, 1.0, 0.3) / (1.0 + g2[trk] / 5.0); best_cont_sc = float(sc.max())
     out["best_lat"] = best_lat
     out["best_gap"] = best_gap
     out["best_cone"] = best_cone

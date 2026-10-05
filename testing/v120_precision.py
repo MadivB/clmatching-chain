@@ -104,6 +104,15 @@ def _torch_dev():
     return _TORCH["dev"]
 
 
+_CONV_CACHE: dict = {}      # speed campaign 2026-10-05: the arrival-time histogram and its template convolution depend only on the
+                            # family geometry (hits, apexes, channels, scan); rounds 2 and 3 of the precision fit reuse them (bit-identical)
+_CONV_CACHE_ON = os.environ.get("CLM_PREC_CACHE", "1") != "0"
+
+
+def precision_cache_reset():
+    _CONV_CACHE.clear()
+
+
 def _family_channels(hx, he, apexes, chans, sipm_c, R, W, ks, t_chain, calib, pile, scan=None):
     SCAN_ = SCAN if scan is None else scan
     """Vectorized per-channel delay-aware fits on the window residual R (nc, nk) with weights W,
@@ -111,32 +120,49 @@ def _family_channels(hx, he, apexes, chans, sipm_c, R, W, ks, t_chain, calib, pi
     (rows, total_loss): rows = (ch, shift_raw [ticks], curvature, A, pile, shift_corr [ticks])."""
     T = _template()
     nc = len(chans); na = len(apexes)
-    P = sipm_c[chans]
-    dd = np.linalg.norm(hx[:, None, :] - P[None, :, :], axis=2)         # (nh, nc) cm
-    wv = he[:, None] / np.maximum(dd, 5.0) ** 2
-    rho = np.zeros(na * nc * NB)
-    for ai, apex in enumerate(apexes):
-        dprop = np.linalg.norm(hx - apex, axis=1) / C                    # ns
-        tau = dprop[:, None] + dd * N_LAR / C
-        b = np.clip(((tau - ARR_LO) / FINE).astype(np.int64), 0, NB - 1)
-        np.add.at(rho, ((ai * nc + np.arange(nc))[None, :] * NB + b).ravel(), wv.ravel())
-    rho = rho.reshape(na * nc, NB)
+    key = None
+    if _CONV_CACHE_ON:
+        try:
+            key = (float(t_chain), int(hx.shape[0]), float(hx[:, 0].sum()), float(he.sum()), tuple(int(c) for c in chans),
+                   tuple(float(v) for a in apexes for v in np.asarray(a).ravel()), id(SCAN_), int(ks[0]), int(ks.size))
+        except Exception:
+            key = None
+    hit = _CONV_CACHE.get(key) if key is not None else None
+    if hit is None:
+        P = sipm_c[chans]
+        dd = np.linalg.norm(hx[:, None, :] - P[None, :, :], axis=2)         # (nh, nc) cm
+        wv = he[:, None] / np.maximum(dd, 5.0) ** 2
+        rho = np.zeros(na * nc * NB)
+        for ai, apex in enumerate(apexes):
+            dprop = np.linalg.norm(hx - apex, axis=1) / C                    # ns
+            tau = dprop[:, None] + dd * N_LAR / C
+            b = np.clip(((tau - ARR_LO) / FINE).astype(np.int64), 0, NB - 1)
+            np.add.at(rho, ((ai * nc + np.arange(nc))[None, :] * NB + b).ravel(), wv.ravel())
+        rho = rho.reshape(na * nc, NB)
     R = np.tile(R, (na, 1)); W = np.tile(W, (na, 1)); pile = np.tile(pile, na)
     chans_all = np.tile(chans, na); cand_of = np.repeat(np.arange(na), nc)
     # fine index of tick k for apex time (t_chain + s): ((k - t_chain - s)*NS - ARR_LO)/FINE  -> (nS, nk), same for all channels
-    m = ((ks[None, :] - t_chain - SCAN_[:, None]) * NS - ARR_LO) / FINE
     nconv = NB + T["tf"].size - 1
-    m = np.clip(m, 0, nconv - 1.001)
-    i0 = np.floor(m).astype(np.int64); fr = m - i0
+    if hit is None:
+        m = ((ks[None, :] - t_chain - SCAN_[:, None]) * NS - ARR_LO) / FINE
+        m = np.clip(m, 0, nconv - 1.001)
+        i0 = np.floor(m).astype(np.int64); fr = m - i0
     if _torch_dev() in ("cuda", "tcpu"):
         import torch
         dev = "cuda" if _torch_dev() == "cuda" else "cpu"
-        rho_t = torch.from_numpy(rho).to(dev)
-        tf_f = _TORCH.get("tf_f_" + dev)
-        if tf_f is None:
-            tf_f = torch.fft.rfft(torch.from_numpy(T["tf"]).to(dev), T["nfft"]); _TORCH["tf_f_" + dev] = tf_f
-        conv_t = torch.fft.irfft(torch.fft.rfft(rho_t, T["nfft"], dim=1) * tf_f[None, :], T["nfft"], dim=1)[:, :nconv]
-        i0_t = torch.from_numpy(i0).to(dev); fr_t = torch.from_numpy(fr).to(dev)
+        if hit is None:
+            rho_t = torch.from_numpy(rho).to(dev)
+            tf_f = _TORCH.get("tf_f_" + dev)
+            if tf_f is None:
+                tf_f = torch.fft.rfft(torch.from_numpy(T["tf"]).to(dev), T["nfft"]); _TORCH["tf_f_" + dev] = tf_f
+            conv_t = torch.fft.irfft(torch.fft.rfft(rho_t, T["nfft"], dim=1) * tf_f[None, :], T["nfft"], dim=1)[:, :nconv]
+            i0_t = torch.from_numpy(i0).to(dev); fr_t = torch.from_numpy(fr).to(dev)
+            if key is not None:
+                if len(_CONV_CACHE) > 20000:
+                    _CONV_CACHE.clear()
+                _CONV_CACHE[key] = ("t", conv_t, i0_t, fr_t)
+        else:
+            _, conv_t, i0_t, fr_t = hit
         M_t = conv_t[:, i0_t] * (1.0 - fr_t)[None] + conv_t[:, i0_t + 1] * fr_t[None]
         R_t = torch.from_numpy(R).to(dev); W_t = torch.from_numpy(W).to(dev)
         den_t = torch.einsum("ck,csk,csk->cs", W_t, M_t, M_t)
@@ -146,7 +172,14 @@ def _family_channels(hx, he, apexes, chans, sipm_c, R, W, ks, t_chain, calib, pi
         Ls = torch.einsum("ck,csk->cs", W_t, resid_t * resid_t).cpu().numpy()
         amps = amps_t.cpu().numpy(); conv_max = conv_t.max(dim=1).values.cpu().numpy()
     else:
-        conv = np.fft.irfft(np.fft.rfft(rho, T["nfft"], axis=1) * T["tf_f"][None, :], T["nfft"], axis=1)[:, :nconv]
+        if hit is None:
+            conv = np.fft.irfft(np.fft.rfft(rho, T["nfft"], axis=1) * T["tf_f"][None, :], T["nfft"], axis=1)[:, :nconv]
+            if key is not None:
+                if len(_CONV_CACHE) > 20000:
+                    _CONV_CACHE.clear()
+                _CONV_CACHE[key] = ("n", conv, i0, fr)
+        else:
+            _, conv, i0, fr = hit
         M = conv[:, i0] * (1.0 - fr)[None] + conv[:, i0 + 1] * fr[None]      # (nc, nS, nk)
         den = np.einsum("ck,csk,csk->cs", W, M, M)
         num = np.einsum("ck,ck,csk->cs", W, R, M)
@@ -238,7 +271,7 @@ def precision_fit(xyz, e, tpc, labels, ts, amp, full, veto, sipm, calib, *,
     st = {}
     fam_render = {}          # (tpc, chain t) -> arrival-equivalent refined time used to render this family (core)
     lab_render = {}          # (tpc, label) -> arrival-equivalent refined time for labels timed separately (pieces)
-    n_rounds = max(1, int(rounds))
+    n_rounds = max(1, int(rounds)); precision_cache_reset()
     for rnd in range(n_rounds):
         st = {"n_fam": 0, "n_fit": 0, "n_ch_used": 0, "e_fit": 0.0, "dt_med_ns": [], "sig_ns": [], "rows": [], "apex_win": [0, 0, 0],
               "n_piece": 0, "n_piece_fit": 0, "pieces": []}

@@ -1087,3 +1087,35 @@ all-TPC 95.76 -> 96.00 (+0.238 pp, 63/0 events), NS 96.77 -> 96.98 (+0.210, 63/0
 20.83 -> 18.04, >= 20 MeV unchanged (total 164.38 -> 155.09); stage audit contact 2.36/0.49, iso 1.46/0.71,
 re-attach 5.67/2.48 GeV fixed/broke; median 142 -> 145 s/ev (stage 2.45 s/ev + vote).  Offline predicted +0.241/+0.209.
 Outputs /pscratch/sd/y/yuxuan/v11arms/BLIP5B; runner testing/sbatch_blip_BLIP5B.sh (batch wrapper batch_blip_BLIP5B.sbatch).
+
+### Speed campaign (2026-10-05): 148 -> target <= 120 s per spill at two workers per GPU
+
+Baseline V14M3 (v1.5 piece-first + flash stages), 63 spills, 2 workers per GPU: event median 148 s, p90 205; stage
+means: clustering+prediction 51 (perceiver 31, frontend clustering 11, track stage 7), matrix 22, Michel stages 7 + 5,
+precision 14, backbone 12, v200 8.6, pass2 8.1, joint 8.0, rescue 3.8.  Whole-chain cProfile (2 spills, exclusive GPU,
+`testing/michel_nd_out/prof_chain_top.log`) and the perceiver profile (`prof_predict.log`, `prof_bf16.log`):
+- perceiver: the 3D-CNN forward is 99 % of the prediction time (grouping / voxelising / materialising < 1 %), 11-14 ms
+  per cluster-TPC group, 1,400-2,100 groups per spill; batch 8 -> 32 saves 19-23 %; bf16 / fp16 autocast are SLOWER
+  (23.5 vs 19.3 s) and move the amplitude patterns by 0.7-1.8 %; cuDNN autotuning and TF32 (already on) change nothing;
+  dropping the 0.5-1.5 MeV groups would save 22 % of the groups but they feed the blip stages.
+- matrix stage (4.1): `_scan_best_shift_multi` is a Python loop over 896 shifts per small cluster (~500 per spill):
+  replaced by an exact FFT scan (`M5p1/fast_shift_scan.py`, two cross-correlations per non-saturating channel, strided
+  exact evaluation for channels that can clip; identical argmin, curve differences at the float32 rounding level;
+  16x faster; env `CLM_FFT_SCAN=0` restores the loop).
+- flash table (`flash_cluster_table.ensure_flash_cluster_flags`): re-cleaned all 70 TPC candidate lists in pure Python
+  after every assignment (1e6 scalar calls per spill, 3.5 s): unchanged lists are now reused from a cache, the cleaner
+  itself vectorised (exact).
+- backbone shift helper `ti_f`: fast-scan image maps live on the GPU and every shift call pulled one to the CPU
+  (45,000 `.cpu()` per 2 spills): one CPU copy per image now.
+- truth loading for scoring (MC only, 7 s per spill in the certification clock, absent in production): backtrack rows
+  read as one contiguous slab instead of h5py fancy indexing.
+- frontend `recluster._file_load` re-executed the toolbox modules on every spill (1 s): memoised (clmatching-frontend).
+- pass2 `pair_features2` member loops vectorised (identical values; small gain, the KD-tree queries dominate).
+Remaining CPU hot spots (per spill): precision `_family_channels` ~7 s (2,500 calls, 3 rounds), joint stage 9 s
+(`family_geodesics` 2 s, 140k small `_shift` calls), v200 `delta_exact` 2.7 s, frontend RANSAC segment builder 3.4 s,
+track stage 9 s, imports ~2 s per spill at 8 spills per worker.
+**V15S1 = V14M3 + FFT scan + perceiver image batch 32 (63 spills, `testing/speed_cert_V15S1.log`): event median
+147.7 -> 131.5 s, p90 205 -> 173, stage sum 151 -> 131 (65.5 s per spill per GPU); matrix 22.0 -> 8.0 s (the rest of
+the stage is the per-candidate masked loss matrix and the leftover-absorption perceiver calls), prediction 30.9 ->
+23.8 s; ledger vs V14M3: NS +0.000 pp (5/1 spills at the rounding level), all-TPC -0.001 (7/4): assignment-neutral.**
+V15S2 = S1 + the CPU fixes above + precision convolution cache + Michel perceiver batch 32 (running).

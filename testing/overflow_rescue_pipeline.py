@@ -763,6 +763,8 @@ def main() -> int:
     ap.add_argument("--mnd-host-dedx-max", type=float, default=1e9)   # host cluster E / skeleton extent (MeV/cm); proton-like hosts carry no Michel
     ap.add_argument("--mnd-tip-face-cm", type=float, default=0.0)      # free tip must be >= this far from the outer detector box (exiting tracks)
     ap.add_argument("--mnd-set", nargs="*", default=[])              # any MichelNDConfig field, k=v (applied after the named flags)
+    ap.add_argument("--image-bf16", action="store_true")              # speed: perceiver forward in bf16 autocast (stage-1 light prediction)
+    ap.add_argument("--cudnn-benchmark", action="store_true")         # speed: cuDNN algorithm autotuning for the 3D convolutions
     ap.add_argument("--michel-flash", action="store_true")           # stage 4.86: unexplained flashes at track ends (needs --michel-nd for the shared setup)
     ap.add_argument("--mfl-set", nargs="*", default=[])              # any MichelFlashConfig field, k=v
     ap.add_argument("--mnd-batch", type=int, default=16)   # 64 x dense voxel grids = 11 GiB: two workers per GPU ran out of memory
@@ -862,6 +864,11 @@ def main() -> int:
     if os.environ.get("CLM_IMAGE_BATCH"):        # shrink render footprint for a memory-constrained GPU
         cfg.prediction.image_batch_size = int(os.environ["CLM_IMAGE_BATCH"])
         print(f"[mem] image_batch_size={cfg.prediction.image_batch_size}", flush=True)
+    if args.image_bf16:
+        cfg.prediction.image_use_mixed_precision = True; print("[speed] perceiver image prediction in bf16 autocast", flush=True)
+    if args.cudnn_benchmark:
+        import torch as _torch_cb
+        _torch_cb.backends.cudnn.benchmark = True; print("[speed] cudnn.benchmark on", flush=True)
     if args.light_ckpt:
         # v0.6.2 / v0.8.5: alternate (e.g. 4x-smaller) amplitude perceiver;
         # the loader reads the checkpoint's "arch" dict when present
@@ -1095,9 +1102,19 @@ def main() -> int:
             v02_moved = {}
             merged_set, merged_placed, merge_stats = set(), {}, None
             pool_stats, rescue_audit = None, []
+            _ti_cpu = {}          # speed 2026-10-05: fast-scan image maps live on the GPU; one CPU copy per image instead of a .cpu() per shift call
+
+            def _ti_host(arr):
+                if isinstance(arr, np.ndarray):
+                    return arr
+                a = _ti_cpu.get(id(arr))
+                if a is None:
+                    a = (arr.detach().cpu().numpy() if hasattr(arr, "detach") else np.asarray(arr), arr)   # keep arr alive so id() stays unique
+                    _ti_cpu[id(arr)] = a
+                return a[0]
             if args.backbone != "prod":
                 def ti_f(arr, t):
-                    return timeinterpolation(arr, shift=float(t), baseline=0).astype(np.float64)
+                    return timeinterpolation(_ti_host(arr), shift=float(t), baseline=0).astype(np.float64)
                 w_full = 1.0 / (GAIN * np.maximum(actual, 100.0))
                 info_b = {}
                 for lab in range(split_index):
@@ -1353,6 +1370,7 @@ def main() -> int:
             police_fn = None
             if args.police:
                 def _ti_f(arr, t):
+                    arr = _ti_host(arr)
                     return timeinterpolation(arr, shift=float(t), baseline=0).astype(np.float64)
                 police_fn = make_police(actual, veto_mask, e_pos, support_cache, label_info,
                                         _ti_f, mode=args.police, topk=int(args.police_topk))
