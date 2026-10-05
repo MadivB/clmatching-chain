@@ -1010,10 +1010,14 @@ def main() -> int:
                                 for l in np.unique(labels_global[okm])}
 
             _t_truth = time.time()
-            truth = tp.extract_event_hit_energy_and_truth_t0(
-                h5, h5["charge/events/ref/charge/calib_prompt_hits/ref"], eventid=int(ev_id),
-                hits_full=h5["charge/calib_prompt_hits/data"], convert_to_matching_ticks=True)
-            truth_t0 = np.asarray(truth["truth_t0"], dtype=np.float64)
+            if os.environ.get("CLM_IGNORE_TRUTH") == "1" or "mc_truth" not in h5:
+                # production / data files: no MC truth -> every truth-based metric is NaN, the chain itself is unchanged
+                truth_t0 = np.full(int(np.asarray(labels_global).size), np.nan, dtype=np.float64); has_truth = False
+            else:
+                truth = tp.extract_event_hit_energy_and_truth_t0(
+                    h5, h5["charge/events/ref/charge/calib_prompt_hits/ref"], eventid=int(ev_id),
+                    hits_full=h5["charge/calib_prompt_hits/data"], convert_to_matching_ticks=True)
+                truth_t0 = np.asarray(truth["truth_t0"], dtype=np.float64); has_truth = True
             tim["truth_s"] = time.time() - _t_truth          # MC-only cost (scoring), absent in production
 
             def _label_truth(lab):
@@ -2719,6 +2723,7 @@ def main() -> int:
                     chg = np.isfinite(ts_bnf) & np.isfinite(ts_anf) & (ts_bnf != ts_anf)
                     st_nf["moved_e_frac"] = float(e_pos[chg].sum() / max(e_pos.sum(), 1e-9))
                     p3_row["new_flash"] = st_nf
+                _ts_pre6 = np.asarray(ns1["hit_timestamps"], np.float32).copy()      # integer-tick assignment before stage 6 (dumped for before/after timing studies)
                 if args.subtick or args.subtick_hit:
                     if _HERE not in sys.path:
                         sys.path.insert(0, _HERE)
@@ -2760,6 +2765,7 @@ def main() -> int:
                             p3_row["conf93"] = st93
                         except Exception as _c93e:
                             p3_row["conf93"] = {"error": repr(_c93e)}
+                _ts_pre7 = np.asarray(ns1["hit_timestamps"], np.float32).copy()      # before stage 7 precision (after subtick)
                 if args.precision:
                     # ---------- STAGE P (v1.2): per-hit precision timing ----------
                     if _HERE not in sys.path:
@@ -2894,6 +2900,10 @@ def main() -> int:
                                      "tpcs": sorted(int(t) for t in
                                                     cluster_to_tpcs.get(int(lab), []))})
                 extra = {}
+                try:
+                    extra["ts_pre6"] = _ts_pre6; extra["ts_pre7"] = _ts_pre7
+                except NameError:
+                    pass
                 if args.evo:
                     extra["t_evo"] = json.dumps(t_evo)
                     try:
