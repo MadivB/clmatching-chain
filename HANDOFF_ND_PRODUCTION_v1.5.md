@@ -130,7 +130,7 @@ Per-hit timing (assigned hits with truth; the window selects on the final time; 
 | | | after sub-tick, before precision | 6.70 | 5.77 | 5.71 |
 | | | **after precision (v1.5 final)** | **3.58** | **2.74** | **2.76** |
 
-The precision stage halves the core width (robust sigma 5.8 → 2.75 ns) and removes the ±8 ns comb of the
-integer-tick assignment; the remaining median offset of −5.6 ns is a global constant (a detector-type / template
-offset, see VERSION_HISTORY v1.2) that a single calibration constant removes.  Histograms:
+The precision stage halves the core width (robust sigma 5.8 → 2.75 ns, std 7.4 → 4.9 ns within 5 ticks) and moves
+the centre from +7.4 ns to −5.6 ns; both centres are global constants (template / detector-type offsets, see
+VERSION_HISTORY v1.2) that one calibration constant removes, so the width is the number to quote.  Histograms:
 `testing/michel_nd_out/tenfile/v15_tenfile_precision_hist_linear.png` and `..._hist.png` (log scale).
