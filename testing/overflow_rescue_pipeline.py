@@ -763,6 +763,8 @@ def main() -> int:
     ap.add_argument("--mnd-host-dedx-max", type=float, default=1e9)   # host cluster E / skeleton extent (MeV/cm); proton-like hosts carry no Michel
     ap.add_argument("--mnd-tip-face-cm", type=float, default=0.0)      # free tip must be >= this far from the outer detector box (exiting tracks)
     ap.add_argument("--mnd-set", nargs="*", default=[])              # any MichelNDConfig field, k=v (applied after the named flags)
+    ap.add_argument("--michel-flash", action="store_true")           # stage 4.86: unexplained flashes at track ends (needs --michel-nd for the shared setup)
+    ap.add_argument("--mfl-set", nargs="*", default=[])              # any MichelFlashConfig field, k=v
     ap.add_argument("--mnd-batch", type=int, default=16)   # 64 x dense voxel grids = 11 GiB: two workers per GPU ran out of memory
     ap.add_argument("--force-light-cm", type=float, default=None,
                     help="stage 4.9 variant (force_light_vote.py): cluster-density vote for noise hits beyond 3 cm, "
@@ -2580,6 +2582,32 @@ def main() -> int:
                           f"({st_m['e_moved']:.0f} MeV) fixed/broke {st_m.get('fixed_e', 0):.0f}/{st_m.get('broke_e', 0):.0f} MeV, {st_m['time_s']:.1f}s {st_m['tim']}", flush=True)
                     tim["after_michel_nd"] = time.time() - t_ev
                     _evo("4.85_michel_nd", ns1["hit_timestamps"])
+                    if args.michel_flash:
+                        # ---- stage 4.86: unexplained flashes at track ends (same predictor, same state; see testing/michel_flash.py)
+                        from michel_flash import run_michel_flash, MichelFlashConfig, channel_positions
+                        import h5py as _h5py
+                        global _CHPOS_CACHE
+                        try:
+                            _CHPOS_CACHE
+                        except NameError:
+                            _CHPOS_CACHE = {}
+                        if file_path not in _CHPOS_CACHE:
+                            _CHPOS_CACHE[file_path] = channel_positions(_h5py.File(file_path, "r"))
+                        _fcfg = MichelFlashConfig()
+                        for _kv in args.mfl_set:
+                            _k, _v = _kv.split("=", 1); _cur = getattr(_fcfg, _k)
+                            setattr(_fcfg, _k, float(_v) if _cur is None else (type(_cur)(float(_v)) if isinstance(_cur, (int, float)) and not isinstance(_cur, bool) else (_v.lower() in ("1", "true") if isinstance(_cur, bool) else _v)))
+                        _mts = np.asarray(ns1["hit_timestamps"], dtype=np.float64).copy()
+                        st_f = run_michel_flash(xyz=np.stack([_mx, _my, _mz], 1).astype(np.float64), e=_me, tpc=_mtpc, labels=_mlab, ts=_mts, amp=_mamp,
+                                                actual=np.asarray(ns1["fullLightWaveform"], np.float32), base=_mbase, veto=veto_mask, ceil=sat_ceil,
+                                                template=_mnd_T, predict_fn=_mnd_predict, ch_pos=_CHPOS_CACHE[file_path], cfg=_fcfg, truth_t0=truth_t0, apply=True)
+                        ns1["hit_timestamps"] = _mts.astype(np.asarray(ns1["hit_timestamps"]).dtype)
+                        mvf = st_f.pop("moves"); p3_row["michel_flash"] = st_f
+                        p3_row["michel_flash_moves"] = [{k: v for k, v in m.items() if k != "hits"} for m in mvf]
+                        print(f"  [4.86 michel-flash] flashes {st_f['n_flash']} candidates {st_f['n_cand']} pairs {st_f['n_pairs']} predictions {st_f['n_pred']} moves {st_f['n_moves']} "
+                              f"({st_f['e_moved']:.0f} MeV) fixed/broke {st_f.get('fixed_e', 0):.0f}/{st_f.get('broke_e', 0):.0f} MeV, {st_f['time_s']:.1f}s {st_f['tim']}", flush=True)
+                        tim["after_michel_flash"] = time.time() - t_ev
+                        _evo("4.86_michel_flash", ns1["hit_timestamps"])
                 # ---------- STAGE 4.9: force coverage ----------
                 if args.force_coverage:
                     if _HERE not in sys.path:

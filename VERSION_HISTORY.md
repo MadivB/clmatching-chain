@@ -848,6 +848,15 @@ apc -0.5 -> 9 moves, 89 % right, 97 / 13 MeV (adopted for this stage; the flash 
 0.43 / broke 0.28 GeV (43 pieces: 24 right 417 MeV, 15 wrong 232 MeV, 13 of them true breaks; wrong ones read mf 0.82 vs
 0.89 and apc -0.64 vs -1.02), 28 flashes / 297 candidates / 130 pairs / 222 predictions per spill, 4.5 s per spill;
 combined 159 moves, 1.70 / 0.55 GeV, delayed class 6.5 -> 11.6 % (piece-first alone 10.1 %), 11.3 s per spill.
+v3 (alpha fitted in the flash window, baseline 12 ticks; mf 0.75 / apc -0.25): flash stage 47 moves, 0.48 / 0.21 GeV,
+4.0 s; combined 162 moves, 1.74 / 0.48, delayed class 11.7 %.  **v4 (mf 0.8 / apc -0.5, the stage's defaults): flash
+stage 32 moves, fixed 0.40 / broke 0.06 GeV (purity 0.87), 28 flashes / 130 pairs / 220 predictions per spill, 4.2 s;
+combined with the v1.5 piece-first stage 147 moves, 1.67 / 0.34 GeV, net +1.33, purity 0.83, 45 / 9 spills, delayed class
+6.5 -> 11.3 % (piece-first alone 10.1 %), 10.7 s per spill** (`michel_nd_out/flash4_63_after.log`).  Verdict: the stage
+works and is clean, but it adds ~0.4 GeV per 63 spills (+1.2 pp on the delayed Michels) for +4 s per spill, because
+it can only see the isolated third of the delayed Michels and the light test then passes a quarter of those.
+Harness: `--michel-flash --mfl-set k=v` (stage 4.86, after 4.85, shares its predictor); certification arm V14M3 =
+V14M2 + `--michel-flash` (`testing/sbatch_v14m_V14M3.sh`, launched 2026-10-05).
   Speed levers left:
 the perceiver's ~11 ms per piece is per-group overhead (grouping / voxelisation), not GPU compute - a piece-level
 voxeliser that reuses the host cluster's voxel grid, or an amplitude-native (no image) prediction path, would take the
