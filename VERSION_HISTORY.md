@@ -1134,3 +1134,20 @@ V15S3 = S2d + precision rounds 2 + stage 4.86 probe-only (`--mfl-set probe_long=
 300 points (`clmatching-frontend/params_speed.json`; the GPU path only accelerates the hypothesis argmax, same RNG
 stream) + a separate timer for the MC-truth extraction (`tim["truth_s"]`): these change results and are validated
 by the ledger, the precision per-hit resolution and the Michel metric.
+**V15S3 (63 spills, `testing/speed_cert_V15S3.log`): event median 123.7 s, p90 158, mean 122.4 (61.2 s per spill per
+GPU); ledger vs V14M3 NS -0.000 (8/7), all-TPC -0.002 (11/13).  Precision 13.0 -> 10.3 s but the per-hit resolution
+degrades (robust sigma 2.79 -> 3.07 ns, |dt| p68 2.80 -> 3.12 ns): 3 rounds stay.  Flash stage 4.6 -> 2.9 s with the
+identical 31 moves / 0.43 / 0.04 GeV: probe-only becomes the default.  RANSAC GPU threshold 300: clustering time
+unchanged (10.5 s): not kept.  The backbone stage read 14.7 s vs 12.6 in S2d with untouched code: node-to-node
+scatter of these timings is +-2 s.  The MC-truth extraction for scoring, timed separately, is 8.7 s per spill (median):
+the production-equivalent event time (t_event - truth_s) is 112.5 s median, p90 150, before the flash change.**
+
+Adopted (default in the code, no flags needed): FFT matrix scan, perceiver image batch 32, flash-table cache,
+weak-reference CPU cache of GPU image maps, precision CPU-side geometry cache, truth slab reads, frontend module
+memoisation, vectorised pass2 features, stage 4.86 probe-only.  Chain time at two workers per 40 GB GPU: 148 -> ~121 s
+median on the certification clock, ~110 s production-equivalent (55 s per spill per GPU); p90 205 -> ~155.
+What is left, per spill: perceiver 23 s (the 3D-CNN forward itself: 11 ms per cluster-TPC group, no cheap lever left
+short of fewer groups or a smaller model), frontend clustering 10.5 s and track stage 4 s (frontend repo), precision
+13 s (torch per-family fits, 2,500 calls), backbone 12.6 s (pool chunk search, swap pass), v200 8.7 s (exact-delta
+block solver), pass2 8 s (KD-tree queries per candidate), joint 8 s (pairwise light-coupling matmuls over full
+windows), matrix 7.9 s (masked loss matrix + leftover-absorption perceiver calls), Michel stages 7.2 + 2.9 s.

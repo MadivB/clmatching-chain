@@ -32,7 +32,7 @@ from michel_nd import PEAK, GAIN, CUT, skeleton_vox, render, support, wcos
 class MichelFlashConfig:
     flash_sum_min = 10000.0; flash_ch_min = 300.0; flash_ch_frac = 0.3; flash_nch_min = 5; flash_rise_min = 0.2; fam_excl_ticks = 10.0
     local_baseline_ticks = 12   # scoring residual is measured above the per-channel median residual over the (k_f-30 .. k_f-4) ticks before the flash (over-predicted tails of big families otherwise swallow a small flash); 0 = off
-    probe_long = True           # predict and score the longest mask of each tip as well as the 5 cm probe (a Michel is longer than the probe)
+    probe_long = False          # 2026-10-05 S3: scoring the longest mask as well as the 5 cm probe changed no move on 63 spills and cost 1.7 s per spill; off
     flash_max_per_tpc = 8; flash_merge_ticks = 6
     lit_unexpl_min = 0.3      # on the lit channels, residual / actual at the peak (a Michel is ~half of what is there on its channels)
     top_frac = 0.5; y_span_max = 120.0   # channels above top_frac x max residual define the flash's y range; a whole-wall residual (big-flash mismatch) is not a Michel

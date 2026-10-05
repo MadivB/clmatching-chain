@@ -861,9 +861,10 @@ def main() -> int:
         print(f"gate thresholds -> excess {args.gate_excess} z {args.gate_zcut} "
               f"nch {args.gate_nch} cos {args.gate_cos}", flush=True)
     cfg = build_default_first_stage_config()
-    if os.environ.get("CLM_IMAGE_BATCH"):        # shrink render footprint for a memory-constrained GPU
+    cfg.prediction.image_batch_size = 32         # speed campaign 2026-10-05: 8 -> 32 saves ~20 % of the perceiver time (validated with 2 workers per 40 GB GPU)
+    if os.environ.get("CLM_IMAGE_BATCH"):        # override (e.g. shrink for a memory-constrained GPU)
         cfg.prediction.image_batch_size = int(os.environ["CLM_IMAGE_BATCH"])
-        print(f"[mem] image_batch_size={cfg.prediction.image_batch_size}", flush=True)
+    print(f"[mem] image_batch_size={cfg.prediction.image_batch_size}", flush=True)
     if args.image_bf16:
         cfg.prediction.image_use_mixed_precision = True; print("[speed] perceiver image prediction in bf16 autocast", flush=True)
     if args.cudnn_benchmark:
