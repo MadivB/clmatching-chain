@@ -134,3 +134,14 @@ The precision stage halves the core width (robust sigma 5.8 → 2.75 ns, std 7.4
 the centre from +7.4 ns to −5.6 ns; both centres are global constants (template / detector-type offsets, see
 VERSION_HISTORY v1.2) that one calibration constant removes, so the width is the number to quote.  Histograms:
 `testing/michel_nd_out/tenfile/v15_tenfile_precision_hist_linear.png` and `..._hist.png` (log scale).
+
+## 8. Giving a tester access to the .pt files
+
+The ten files live on pscratch (purged after 8 weeks of no access; copy to `/global/cfs/cdirs/dune/...` for anything
+longer).  Access for an individual NERSC account is granted with POSIX ACLs, as for the v1.0 files:
+```bash
+setfacl -m u:<user>:r-x /pscratch/sd/y/yuxuan/v15_10files_b            # traverse the parent
+setfacl -R -m u:<user>:rX /pscratch/sd/y/yuxuan/v15_10files_b/pt       # read the files
+setfacl -R -d -m u:<user>:rX /pscratch/sd/y/yuxuan/v15_10files_b/pt    # new files inherit
+```
+(`/pscratch/sd/y/yuxuan` itself already carries `user:sindhu:r-x`.)  Granted to `sindhu` on 2026-10-05.
