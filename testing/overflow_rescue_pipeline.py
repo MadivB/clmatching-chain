@@ -924,9 +924,10 @@ def main() -> int:
     else:
         # v1.5.1: at batch 32 a worker peaks at ~31 GB of GPU memory (measured on
         # a MiniProdN5p1 spill), so two workers share a GPU only on 80 GB cards.
-        # On smaller cards use 16 (peak ~14 GB): the assignment is unchanged and
-        # sub-tick times differ by < 0.003 ns. 80 GB cards keep 32, bit-identical
-        # to the v1.5 certification.
+        # On smaller cards use 16 (peak ~14 GB): batched inference is not bit-
+        # invariant, so a few near-tie decisions can flip (MiniProdN5p1 file 1:
+        # 27 hits, 0.001 % of the energy; accuracy and timing resolution
+        # unchanged). 80 GB cards keep 32, bit-identical to the v1.5 certification.
         try:
             import torch
             if (torch.cuda.is_available()

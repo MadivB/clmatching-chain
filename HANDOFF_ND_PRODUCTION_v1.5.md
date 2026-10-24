@@ -47,7 +47,8 @@ export HDF5_USE_FILE_LOCKING=FALSE OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_
 ```
 GPU: at the perceiver image batch of 32 a worker peaks at ~31 GB, so two workers share an 80 GB A100 (a third worker
 or a larger batch runs out of memory). From v1.5.1 the chain uses batch 16 on GPUs below 70 GiB (peak ~14 GB), so two
-workers also share a 40 GB A100 (assignment unchanged, sub-tick times within 0.003 ns). CPU: one thread per worker is
+workers also share a 40 GB A100 (a few near-tie decisions flip: on file 1, 0.001 % of the energy; accuracy and
+timing resolution unchanged; 80 GB cards stay bit-identical to the certification). CPU: one thread per worker is
 enough (the chain is single-threaded numpy/torch).
 
 ## 4. How to run

@@ -1176,7 +1176,10 @@ v1.5.1 = v1.5 + two changes in `testing/overflow_rescue_pipeline.py`, so the cha
   statements above should read 80 GB.  Without `CLM_IMAGE_BATCH`, the batch is now 16 on GPUs
   with < 70 GiB (peak 13.7 GB) and stays 32 otherwise.
 
-Verification, spill 0 of file 0000001, bare pytorch module (no user site), 40 GB A100: forced batch 32 is
-bit-identical to the certified v1.5 dump (labels, all hit times, confidence, sigma); automatic batch 16 has identical
-labels and integer-tick times, sub-tick times within 1.8e-4 ticks (0.003 ns) on 6.8 % of hits, confidence within
-2.4e-5.  ND production install: ND_Production `run-cl-matching/install_cl_matching.sh` pins tag `CLMatching_v1.5.1`.
+Verification, bare pytorch module (no user site), 40 GB A100s.  Spill 0 of file 0000001: forced batch 32 is
+bit-identical to the certified v1.5 dump (labels, all hit times, confidence, sigma).  Whole file 0000001 (13 spills)
+through ND_Production's run_cl_matching_ND_sim.sh at its default 8 workers on 4 x 40 GB (automatic batch 16):
+batched inference is not bit-invariant, so a few near-tie decisions flip: cluster ids identical, 99.87 % of hit
+times within 0.01 ns of the certified output, 27 hits (0.001 % of the energy) re-timed by more than 10 ticks, all
+of them already wrong at batch 32; energy-weighted accuracy 96.193 % in both, per-hit timing robust sigma
+2.830 -> 2.829 ns.  On 80 GB GPUs (batch 32) the output stays bit-identical to the certification.  ND production install: ND_Production `run-cl-matching/install_cl_matching.sh` pins tag `CLMatching_v1.5.1`.
