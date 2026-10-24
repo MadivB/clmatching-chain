@@ -17,7 +17,7 @@ campaign of 2026-10-05 (assignment-neutral). Certified on flow files 1–5 (63 s
 | all-TPC accuracy | 95.90 % |
 | per-hit timing residual, robust sigma, assigned hits | 2.79 ns |
 | Michel-electron energy correctly timed (direct truth metric) | 38.6 % |
-| wall time per spill, two worker processes per 40 GB A100 | 122 s median on the MC certification clock, ~110 s without the MC-truth scoring load (p90 160 / 150) |
+| wall time per spill, two worker processes per 80 GB A100 | 122 s median on the MC certification clock, ~110 s without the MC-truth scoring load (p90 160 / 150) |
 
 Ledger provenance: `testing/speed_cert_V15S2d.log` (ledger + stage timing), `testing/v14m_cert_V14M3.log`
 (Michel stages), `VERSION_HISTORY.md` (every stage, every certification, including the ones not adopted).
@@ -45,8 +45,10 @@ export PYTHONUSERBASE=/global/homes/y/yuxuan/.local/perlmutter/pytorch2.8.0   # 
 unset PYTHONPATH
 export HDF5_USE_FILE_LOCKING=FALSE OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 V200_DOM=3
 ```
-GPU: one NVIDIA A100 40 GB per two worker processes (the perceiver image batch is 32; a third worker per GPU or a
-larger batch runs out of memory). CPU: one thread per worker is enough (the chain is single-threaded numpy/torch).
+GPU: at the perceiver image batch of 32 a worker peaks at ~31 GB, so two workers share an 80 GB A100 (a third worker
+or a larger batch runs out of memory). From v1.5.1 the chain uses batch 16 on GPUs below 70 GiB (peak ~14 GB), so two
+workers also share a 40 GB A100 (assignment unchanged, sub-tick times within 0.003 ns). CPU: one thread per worker is
+enough (the chain is single-threaded numpy/torch).
 
 ## 4. How to run
 
@@ -94,7 +96,7 @@ This is the v1.0 production schema (`testing/make_pt_v1.py`) plus the ns copies 
 
 - Time per spill scales with activity (p90 is 1.3x the median); 8 workers on a 4-GPU node process 63 spills in ~35 min.
 - The chain is deterministic given the inputs; the only randomness is the frontend RANSAC, which uses a fixed RNG stream.
-- Memory: ~6 GB GPU per worker during prediction, up to ~18 GB transiently; ~10 GB host RAM per worker.
+- Memory: up to ~31 GB GPU per worker at batch 32 (~14 GB at batch 16, the v1.5.1 default on 40 GB GPUs); ~10 GB host RAM per worker.
 - Known limits (physics, documented in `V130_PHYSICS_CAPABILITIES.md`): isolated 1–20 MeV deposits are the weak point
   (interaction-level recovery 32–42 %); delayed Michels are 17–21 % correctly timed (pile-up), prompt ones 95 %.
 - Documents: `VERSION_HISTORY.md` (living record), `V130_CHAIN_REPORT.md` (method + ledger + timing),

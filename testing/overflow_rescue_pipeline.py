@@ -49,6 +49,63 @@ import json
 import os
 import sys
 import time
+import types
+import importlib.abc
+import importlib.machinery
+
+
+# v1.5.1: plotly and the cmasher / cmcrameri colormaps are imported at module
+# level by plotting helpers that sit in the import graph of the run path but are
+# never called in a production run. When they are not installed (e.g. the bare
+# NERSC pytorch module, as for the ND production account), resolve them to inert
+# stand-ins instead of failing at startup. Installed packages are always used:
+# this finder is consulted only after the normal import machinery found nothing.
+class _Inert:
+    def __getattr__(self, name):
+        return self
+
+    def __call__(self, *args, **kwargs):
+        return self
+
+    def __getitem__(self, key):
+        return self
+
+    def __iter__(self):
+        return iter(())
+
+    def __len__(self):
+        return 1
+
+    # import-time colour palettes are built as px.colors.qualitative.A + ... + D
+    def __add__(self, other):
+        return self
+
+    __radd__ = __mul__ = __rmul__ = __add__
+
+
+class _InertModule(types.ModuleType):
+    def __getattr__(self, name):
+        if name.startswith("__"):
+            raise AttributeError(name)
+        return _Inert()
+
+
+class _OptionalFigurePackages(importlib.abc.MetaPathFinder, importlib.abc.Loader):
+    ROOTS = ("plotly", "_plotly_utils", "cmasher", "cmcrameri", "colorspacious", "narwhals")
+
+    def find_spec(self, name, path=None, target=None):
+        if name.split(".")[0] in self.ROOTS:
+            return importlib.machinery.ModuleSpec(name, self, is_package=True)
+        return None
+
+    def create_module(self, spec):
+        return _InertModule(spec.name)
+
+    def exec_module(self, module):
+        module.__path__ = []
+
+
+sys.meta_path.append(_OptionalFigurePackages())
 
 _HERE = os.path.abspath(os.path.dirname(__file__))
 BASE_DIR = os.path.abspath(os.path.join(_HERE, "..", "CLMatching_AlphaRelease"))
@@ -861,9 +918,22 @@ def main() -> int:
         print(f"gate thresholds -> excess {args.gate_excess} z {args.gate_zcut} "
               f"nch {args.gate_nch} cos {args.gate_cos}", flush=True)
     cfg = build_default_first_stage_config()
-    cfg.prediction.image_batch_size = 32         # speed campaign 2026-10-05: 8 -> 32 saves ~20 % of the perceiver time (validated with 2 workers per 40 GB GPU)
+    cfg.prediction.image_batch_size = 32         # speed campaign 2026-10-05: 8 -> 32 saves ~20 % of the perceiver time (two workers per 80 GB GPU)
     if os.environ.get("CLM_IMAGE_BATCH"):        # override (e.g. shrink for a memory-constrained GPU)
         cfg.prediction.image_batch_size = int(os.environ["CLM_IMAGE_BATCH"])
+    else:
+        # v1.5.1: at batch 32 a worker peaks at ~31 GB of GPU memory (measured on
+        # a MiniProdN5p1 spill), so two workers share a GPU only on 80 GB cards.
+        # On smaller cards use 16 (peak ~14 GB): the assignment is unchanged and
+        # sub-tick times differ by < 0.003 ns. 80 GB cards keep 32, bit-identical
+        # to the v1.5 certification.
+        try:
+            import torch
+            if (torch.cuda.is_available()
+                    and torch.cuda.get_device_properties(0).total_memory < 70 * 2**30):
+                cfg.prediction.image_batch_size = 16
+        except Exception:
+            pass
     print(f"[mem] image_batch_size={cfg.prediction.image_batch_size}", flush=True)
     if args.image_bf16:
         cfg.prediction.image_use_mixed_precision = True; print("[speed] perceiver image prediction in bf16 autocast", flush=True)

@@ -1158,3 +1158,25 @@ all-TPC accuracy 96.09 % (energy-weighted; per file 96.40-97.24 / 95.08-96.80), 
 8 workers on 4 GPUs; per-hit timing residual within 5 ticks of truth (21.9 M hits): integer-tick assignment std 8.09 /
 robust 6.72 ns -> after subtick 7.41 / 5.79 -> after precision 4.86 / 2.75 ns; within 2 ticks: 7.43 / 6.69 -> 6.70 /
 5.77 -> 3.58 / 2.74 ns; median offset -5.6 ns (global constant).  Handoff document `HANDOFF_ND_PRODUCTION_v1.5.md`.
+
+## v1.5.1 (2026-10-24): production hardening, assignment unchanged
+
+v1.5.1 = v1.5 + two changes in `testing/overflow_rescue_pipeline.py`, so the chain runs on the ND production setup
+(ND_Production `run-cl-matching`, account dunepro) as is.  No stage, flag or parameter changes.
+
+* **Figure packages optional.** plotly and the cmasher / cmcrameri colormaps are imported at module level by plotting
+  helpers on the run path's import graph (frontend and M5p1 `global_track_clustering*`, `truth_plotting`,
+  `plottingTools`, ...) but never called in a run; they existed only in a personal user site, so the chain failed at
+  startup on the bare NERSC pytorch module.  When they are not installed, the harness now resolves them to inert
+  stand-ins (a meta-path finder consulted only after the normal import machinery; installed packages are always used).
+* **Perceiver batch follows the GPU memory.** At batch 32 one worker peaks at 31.4 GB (spill 0 of MiniProdN5p1 file
+  0000001, the same with and without the user site), so the launcher's two workers per GPU fit only on 80 GB A100s;
+  on 40 GB A100s 7 of 13 spills of a file ran out of memory.  Note: the v1.5 speed campaign and certification runs
+  were on 80 GB nodes (e.g. the ten-file sample: job 59394078, nid200309, hbm80g), so the "two workers per 40 GB GPU"
+  statements above should read 80 GB.  Without `CLM_IMAGE_BATCH`, the batch is now 16 on GPUs
+  with < 70 GiB (peak 13.7 GB) and stays 32 otherwise.
+
+Verification, spill 0 of file 0000001, bare pytorch module (no user site), 40 GB A100: forced batch 32 is
+bit-identical to the certified v1.5 dump (labels, all hit times, confidence, sigma); automatic batch 16 has identical
+labels and integer-tick times, sub-tick times within 1.8e-4 ticks (0.003 ns) on 6.8 % of hits, confidence within
+2.4e-5.  ND production install: ND_Production `run-cl-matching/install_cl_matching.sh` pins tag `CLMatching_v1.5.1`.
